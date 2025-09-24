@@ -1,0 +1,34 @@
+{
+  "scheduler": {
+    "fetch_times": [
+      "08:00",
+      "14:00", 
+      "20:00"
+    ],
+    "timezone": "Asia/Shanghai",
+    "max_retries": 3,
+    "retry_delay_minutes": 30
+  },
+  "fetcher": {
+    "request_timeout": 30,
+    "request_delay": 0.5,
+    "max_pages_per_fetch": 50,
+    "max_known_match_ids": 10000
+  },
+  "data": {
+    "data_dir": "data",
+    "log_dir": "logs",
+    "backup_enabled": true,
+    "backup_days": 7
+  },
+  "api": {
+    "base_url": "https://gate.5eplay.com/crane/http/api/data/match/list",
+    "uuid": "4ecb6b0d-a7ca-11ea-8109-ec0d9a7185b0",
+    "limit": 30,
+    "game_mode": "39"
+  },
+  "filter": {
+    "target_date": "2025-09-01 00:00:00",
+    "lookback_hours": 1
+  }
+}
