@@ -1,0 +1,5 @@
+.serena
+venv
+csgo-dashboard/node_modules
+csgo-dashboard/build
+.DS_Store
