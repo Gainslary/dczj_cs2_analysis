@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Typography } from 'antd';
-import { TrophyOutlined, UserOutlined } from '@ant-design/icons';
+import { TrophyOutlined, UserOutlined, CrownOutlined } from '@ant-design/icons';
 import MatchesDashboard from './components/MatchesDashboard';
 import PlayerAnalysis from './components/PlayerAnalysis';
+import Leaderboard from './components/Leaderboard';
 import './App.css';
 
 const { Header, Content } = Layout;
@@ -13,10 +14,16 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
   
+  // 设置页面标题
+  useEffect(() => {
+    document.title = '大畜之家cs对局分析平台';
+  }, []);
+  
   // 根据当前路径确定选中的菜单项
   const getSelectedKey = () => {
     const path = location.pathname;
     if (path.includes('/players')) return 'players';
+    if (path.includes('/leaderboard')) return 'leaderboard';
     return 'matches';
   };
 
@@ -30,6 +37,11 @@ function AppContent() {
       key: 'players',
       icon: <UserOutlined />,
       label: '玩家分析',
+    },
+    {
+      key: 'leaderboard',
+      icon: <CrownOutlined />,
+      label: '排行榜',
     },
   ];
 
@@ -48,6 +60,7 @@ function AppContent() {
             onClick={({ key }) => {
               if (key === 'matches') navigate('/matches');
               else if (key === 'players') navigate('/players');
+              else if (key === 'leaderboard') navigate('/leaderboard');
             }}
             className="app-menu"
           />
@@ -63,6 +76,10 @@ function AppContent() {
           <Route 
             path="/players" 
             element={<PlayerAnalysis />} 
+          />
+          <Route 
+            path="/leaderboard" 
+            element={<Leaderboard />} 
           />
         </Routes>
       </Content>

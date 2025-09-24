@@ -948,6 +948,186 @@ def get_match_players(match_id):
         logger.error(f"获取比赛玩家数据错误: {e}")
         return jsonify({'error': '服务器内部错误'}), 500
 
+@app.route('/api/leaderboard', methods=['GET'])
+def get_leaderboard():
+    """获取全玩家排行榜数据"""
+    try:
+        # 获取查询参数
+        stat_type = request.args.get('stat', 'rating2')  # 排行榜类型
+        map_filter = request.args.get('map', '')  # 地图筛选
+        
+        # 验证排行榜类型
+        valid_stats = {
+            'rating2': 'AVG(rating2)',
+            'rating': 'AVG(rating)',
+            'adr': 'AVG(adr)',
+            'kd_ratio': 'SUM(kills) / NULLIF(SUM(deaths), 0)',
+            'kills': 'SUM(kills)',
+            'headshot_rate': 'AVG(per_headshot)',
+            'first_kill': 'SUM(first_kill)',
+            'first_death': 'SUM(first_death)',
+            'first_kill_rate': 'SUM(mps.first_kill) / NULLIF(SUM(m.round_total), 0)',
+            'first_death_rate': 'SUM(mps.first_death) / NULLIF(SUM(m.round_total), 0)',
+            'awp_kills': 'SUM(awp_kill)',
+            'mvp_count': 'SUM(CASE WHEN is_mvp = 1 THEN 1 ELSE 0 END)',
+            'win_rate': 'AVG(CASE WHEN is_win = 1 THEN 1 ELSE 0 END)',
+            'kast': 'AVG(kast)',
+            'rws': 'AVG(rws)'
+        }
+        
+        if stat_type not in valid_stats:
+            return jsonify({'error': '无效的排行榜类型'}), 400
+        
+        # 构建基础查询
+        base_query = f"""
+        SELECT 
+            p.username,
+            p.nickname,
+            p.platform_level,
+            p.steam_id,
+            COUNT(DISTINCT mps.match_id) as total_matches,
+            {valid_stats[stat_type]} as stat_value,
+            AVG(mps.rating2) as avg_rating2,
+            AVG(mps.rating) as avg_rating,
+            AVG(mps.adr) as avg_adr,
+            SUM(mps.kills) / NULLIF(SUM(mps.deaths), 0) as kd_ratio,
+            SUM(mps.kills) as total_kills,
+            SUM(mps.deaths) as total_deaths,
+            SUM(mps.assists) as total_assists,
+            AVG(mps.per_headshot) as avg_headshot_rate,
+            SUM(mps.first_kill) as total_first_kills,
+            SUM(mps.first_death) as total_first_deaths,
+            SUM(mps.first_kill) / NULLIF(SUM(m.round_total), 0) as first_kill_rate,
+            SUM(mps.first_death) / NULLIF(SUM(m.round_total), 0) as first_death_rate,
+            SUM(mps.awp_kill) as total_awp_kills,
+            SUM(CASE WHEN m.mvp_uid = mps.uid THEN 1 ELSE 0 END) as mvp_count,
+            AVG(CASE WHEN m.match_winner = mps.team_id THEN 1 ELSE 0 END) as win_rate,
+            AVG(mps.kast) as avg_kast,
+            AVG(mps.rws) as avg_rws,
+            MAX(m.start_time) as last_match_time
+        FROM match_player_stats mps
+        JOIN players p ON mps.uid = p.uid
+        JOIN matches m ON mps.match_id = m.match_id
+        WHERE 1=1
+        """
+        
+        params = []
+        
+        # 添加筛选条件
+        if map_filter:
+            base_query += " AND m.map_name = %s"
+            params.append(map_filter)
+        
+        # 分组和排序
+        base_query += f"""
+        GROUP BY p.uid, p.username, p.nickname, p.platform_level, p.steam_id
+        ORDER BY stat_value DESC
+        """
+        
+        # 执行查询
+        result = execute_query(base_query, params)
+        
+        if result is None:
+            return jsonify({'error': '数据库查询失败'}), 500
+        
+        # 格式化结果
+        leaderboard_data = []
+        for i, row in enumerate(result):
+            player_data = {
+                'rank': i + 1,
+                'username': row['username'],
+                'nickname': row['nickname'],
+                'platform_level': row['platform_level'],
+                'steam_id': row['steam_id'],
+                'total_matches': row['total_matches'],
+                'stat_value': round(float(row['stat_value']) if row['stat_value'] else 0, 3),
+                'stats': {
+                    'avg_rating2': round(float(row['avg_rating2']) if row['avg_rating2'] else 0, 3),
+                    'avg_rating': round(float(row['avg_rating']) if row['avg_rating'] else 0, 3),
+                    'avg_adr': round(float(row['avg_adr']) if row['avg_adr'] else 0, 2),
+                    'kd_ratio': round(float(row['kd_ratio']) if row['kd_ratio'] else 0, 2),
+                    'total_kills': row['total_kills'],
+                    'total_deaths': row['total_deaths'],
+                    'total_assists': row['total_assists'],
+                    'avg_headshot_rate': round(float(row['avg_headshot_rate']) if row['avg_headshot_rate'] else 0, 3),
+                    'total_first_kills': row['total_first_kills'],
+                    'total_first_deaths': row['total_first_deaths'],
+                    'first_kill_rate': round(float(row['first_kill_rate']) if row['first_kill_rate'] else 0, 3),
+                    'first_death_rate': round(float(row['first_death_rate']) if row['first_death_rate'] else 0, 3),
+                    'total_awp_kills': row['total_awp_kills'],
+                    'mvp_count': row['mvp_count'],
+                    'win_rate': round(float(row['win_rate']) if row['win_rate'] else 0, 3),
+                    'avg_kast': round(float(row['avg_kast']) if row['avg_kast'] else 0, 3),
+                    'avg_rws': round(float(row['avg_rws']) if row['avg_rws'] else 0, 2)
+                },
+                'last_match_time': row['last_match_time']
+            }
+            leaderboard_data.append(player_data)
+        
+        return jsonify({
+            'success': True,
+            'data': leaderboard_data,
+            'meta': {
+                'stat_type': stat_type,
+                'total_players': len(leaderboard_data),
+                'map_filter': map_filter
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取排行榜数据失败: {e}")
+        return jsonify({'error': f'获取排行榜数据失败: {str(e)}'}), 500
+
+@app.route('/api/leaderboard/stats-types', methods=['GET'])
+def get_leaderboard_stats_types():
+    """获取可用的排行榜统计类型"""
+    stats_types = [
+        {'key': 'rating2', 'name': 'Rating 2.0', 'description': '平均Rating 2.0评分'},
+        {'key': 'rating', 'name': 'Rating', 'description': '平均Rating评分'},
+        {'key': 'adr', 'name': 'ADR', 'description': '平均每回合伤害'},
+        {'key': 'kd_ratio', 'name': 'K/D比', 'description': '击杀死亡比'},
+        {'key': 'kills', 'name': '总击杀', 'description': '总击杀数'},
+        {'key': 'headshot_rate', 'name': '爆头率', 'description': '平均爆头率'},
+        {'key': 'first_kill', 'name': '首杀', 'description': '总首杀数'},
+        {'key': 'first_death', 'name': '总首死', 'description': '总首死数'},
+        {'key': 'first_kill_rate', 'name': '首杀率', 'description': '首杀率（首杀数/总回合数）'},
+        {'key': 'first_death_rate', 'name': '首死率', 'description': '首死率（首死数/总回合数）'},
+        {'key': 'awp_kills', 'name': 'AWP击杀', 'description': '总AWP击杀数'},
+        {'key': 'mvp_count', 'name': 'MVP次数', 'description': 'MVP获得次数'},
+        {'key': 'win_rate', 'name': '胜率', 'description': '比赛胜率'},
+        {'key': 'kast', 'name': 'KAST', 'description': '平均KAST评分'},
+        {'key': 'rws', 'name': 'RWS', 'description': '平均RWS评分'}
+    ]
+    
+    return jsonify({
+        'success': True,
+        'data': stats_types
+    })
+
+@app.route('/api/leaderboard/filters', methods=['GET'])
+def get_leaderboard_filters():
+    """获取排行榜筛选选项"""
+    try:
+        # 获取可用地图
+        maps_query = "SELECT DISTINCT map_name FROM matches ORDER BY map_name"
+        maps_result = execute_query(maps_query)
+        
+        # 获取可用赛季
+        seasons_query = "SELECT DISTINCT season FROM match_player_stats WHERE season IS NOT NULL ORDER BY season DESC"
+        seasons_result = execute_query(seasons_query)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'maps': [row['map_name'] for row in maps_result] if maps_result else [],
+                'seasons': [row['season'] for row in seasons_result] if seasons_result else []
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取筛选选项失败: {e}")
+        return jsonify({'error': f'获取筛选选项失败: {str(e)}'}), 500
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """健康检查接口"""

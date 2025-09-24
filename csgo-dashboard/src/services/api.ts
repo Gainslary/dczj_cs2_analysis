@@ -448,30 +448,113 @@ export const matchesAPI = {
   },
 };
 
+// 排行榜相关接口定义
+export interface LeaderboardPlayer {
+  rank: number;
+  username: string;
+  nickname: string;
+  platform_level: number;
+  steam_id: string;
+  total_matches: number;
+  stat_value: number;
+  stats: {
+    avg_rating2: number;
+    avg_rating: number;
+    avg_adr: number;
+    kd_ratio: number;
+    total_kills: number;
+    total_deaths: number;
+    total_assists: number;
+    avg_headshot_rate: number;
+    total_first_kills: number;
+    total_first_deaths: number;
+    first_kill_rate: number;
+    first_death_rate: number;
+    total_awp_kills: number;
+    mvp_count: number;
+    win_rate: number;
+    avg_kast: number;
+    avg_rws: number;
+  };
+  last_match_time: number;
+}
+
+export interface LeaderboardResponse {
+  success: boolean;
+  data: LeaderboardPlayer[];
+  meta: {
+    stat_type: string;
+    total_players: number;
+    map_filter: string;
+    season_filter: string;
+    min_matches: number;
+    limit: number;
+  };
+}
+
+export interface StatType {
+  key: string;
+  name: string;
+  description: string;
+}
+
+export interface LeaderboardFilters {
+  maps: string[];
+  seasons: string[];
+}
+
 export const playersAPI = {
   // 搜索玩家
   searchPlayers: async (nickname: string): Promise<Player[]> => {
-    const response = await api.get(`/players/search?nickname=${encodeURIComponent(nickname)}`);
-    return (response.data as SearchPlayersResponse).players;
+    const response = await api.get<SearchPlayersResponse>(`/players/search?nickname=${encodeURIComponent(nickname)}`);
+    return response.data.players;
   },
 
   // 获取玩家统计数据
   getPlayerStats: async (steamId: string): Promise<PlayerStats> => {
-    const response = await api.get(`/player/${encodeURIComponent(steamId)}/stats`);
-    const rawStats = response.data as RawPlayerStats;
-    return convertRawPlayerStatsToPlayerStats(rawStats);
+    const response = await api.get<RawPlayerStats>(`/player/${steamId}/stats`);
+    return convertRawPlayerStatsToPlayerStats(response.data);
   },
 
   // 获取玩家比赛记录
   getPlayerMatches: async (steamId: string, page: number = 1, limit: number = 10): Promise<PlayerMatchesResult> => {
-    const response = await api.get(`/player/${encodeURIComponent(steamId)}/recent-matches`, {
-      params: { page, limit }
-    });
-    const rawResponse = response.data as PlayerMatchesResponse;
+    const response = await api.get<PlayerMatchesResponse>(`/player/${steamId}/recent-matches?page=${page}&limit=${limit}`);
+    
+    const convertedMatches = response.data.matches.map(convertRawPlayerMatchToPlayerMatch);
+    
     return {
-      matches: rawResponse.matches.map(convertRawPlayerMatchToPlayerMatch),
-      pagination: rawResponse.pagination
+      matches: convertedMatches,
+      pagination: response.data.pagination
     };
+  },
+};
+
+export const leaderboardAPI = {
+  // 获取排行榜数据
+  getLeaderboard: async (
+    statType: string = 'rating2',
+    mapFilter: string = ''
+  ): Promise<LeaderboardResponse> => {
+    const params = new URLSearchParams({
+      stat: statType
+    });
+    
+    if (mapFilter) params.append('map', mapFilter);
+    
+    const response = await api.get<LeaderboardResponse>(`/leaderboard?${params.toString()}`);
+    return response.data;
+  },
+
+  // 获取可用的统计类型
+  getStatsTypes: async (): Promise<StatType[]> => {
+    const response = await api.get<{success: boolean; data: StatType[]}>('/leaderboard/stats-types');
+    return response.data.data;
+  },
+
+  // 获取筛选选项
+  getFilters: async (): Promise<LeaderboardFilters> => {
+    const response = await api.get<{success: boolean; data: LeaderboardFilters}>('/leaderboard/filters');
+    return response.data.data;
   },
 };
 

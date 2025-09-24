@@ -1,0 +1,585 @@
+.leaderboard-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  min-height: 100vh;
+  color: #ffffff;
+}
+
+.leaderboard-header {
+  text-align: center;
+  margin-bottom: 30px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.leaderboard-header h1 {
+  font-size: 2.5rem;
+  margin: 0 0 10px 0;
+  background: linear-gradient(45deg, #FFD700, #FFA500);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+}
+
+.leaderboard-header p {
+  font-size: 1.1rem;
+  color: #b0b0b0;
+  margin: 0;
+}
+
+/* 筛选控件样式 */
+.filters-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-bottom: 30px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  align-items: end;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 150px;
+}
+
+.filter-group label {
+  font-size: 0.9rem;
+  color: #b0b0b0;
+  font-weight: 500;
+}
+
+.filter-select,
+.filter-input {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+}
+
+.filter-select:focus,
+.filter-input:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
+}
+
+.filter-select option {
+  background: #2a2a3e;
+  color: #ffffff;
+}
+
+.refresh-btn {
+  padding: 8px 16px;
+  background: linear-gradient(45deg, #4CAF50, #45a049);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  height: fit-content;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 表格样式 */
+.leaderboard-table-container {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.leaderboard-table thead {
+  background: linear-gradient(45deg, #2a2a3e, #3a3a5e);
+}
+
+.leaderboard-table th {
+  padding: 15px 10px;
+  text-align: left;
+  font-weight: 600;
+  color: #ffffff;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.leaderboard-table tbody tr {
+  transition: all 0.3s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.leaderboard-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: scale(1.01);
+}
+
+.leaderboard-table td {
+  padding: 12px 10px;
+  vertical-align: middle;
+}
+
+/* 特定列样式 */
+.rank-cell {
+  text-align: center;
+  font-weight: bold;
+  width: 60px;
+}
+
+.rank-number {
+  font-size: 1.1rem;
+  font-weight: bold;
+  text-shadow: 0 0 10px currentColor;
+}
+
+.player-cell {
+  min-width: 180px;
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.player-name {
+  font-weight: 600;
+  color: #ffffff;
+  font-size: 1rem;
+}
+
+.player-username {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+
+
+.matches-cell {
+  text-align: center;
+  color: #b0b0b0;
+}
+
+.stat-value-cell {
+  text-align: center;
+  font-weight: bold;
+}
+
+.stat-value {
+  font-size: 1.1rem;
+  color: #FFD700;
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+}
+
+.rating-cell {
+  text-align: center;
+  font-weight: 600;
+  color: #4CAF50;
+}
+
+.kd-cell {
+  text-align: center;
+  font-weight: 600;
+}
+
+.adr-cell {
+  text-align: center;
+  color: #FF9800;
+}
+
+.winrate-cell {
+  text-align: center;
+  color: #2196F3;
+  font-weight: 500;
+}
+
+.mvp-cell {
+  text-align: center;
+  color: #FFD700;
+  font-weight: 600;
+}
+
+.time-cell {
+  text-align: center;
+  color: #888;
+  font-size: 0.85rem;
+}
+
+/* 状态样式 */
+.loading {
+  text-align: center;
+  padding: 50px;
+  font-size: 1.2rem;
+  color: #4CAF50;
+}
+
+.error-message {
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  color: #f44336;
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.no-data {
+  text-align: center;
+  padding: 50px;
+  color: #888;
+  font-size: 1.1rem;
+}
+
+.stats-summary {
+  margin-top: 20px;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  text-align: center;
+  color: #b0b0b0;
+  font-size: 0.9rem;
+}
+
+.stats-summary p {
+  margin: 5px 0;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .leaderboard-table {
+    font-size: 0.8rem;
+  }
+  
+  .leaderboard-table th,
+  .leaderboard-table td {
+    padding: 8px 6px;
+  }
+}
+
+@media (max-width: 768px) {
+  .leaderboard-container {
+    padding: 10px;
+  }
+  
+  .filters-section {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .filter-group {
+    min-width: auto;
+  }
+  
+  .leaderboard-table-container {
+    overflow-x: auto;
+  }
+  
+  .leaderboard-table {
+    min-width: 800px;
+    font-size: 0.75rem;
+  }
+  
+  .leaderboard-header h1 {
+    font-size: 2rem;
+  }
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.player-row {
+  animation: fadeIn 0.5s ease-out;
+}
+
+/* 新增列样式 */
+.kills-cell,
+.assists-cell,
+.first-kill-cell,
+.first-death-cell,
+.awp-cell {
+  text-align: center;
+  color: #FF9800;
+  font-weight: 500;
+}
+
+.headshot-cell,
+.first-kill-rate-cell,
+.first-death-rate-cell,
+.kast-cell {
+  text-align: center;
+  color: #9C27B0;
+  font-weight: 500;
+}
+
+.rws-cell {
+  text-align: center;
+  color: #00BCD4;
+  font-weight: 500;
+}
+
+/* 点击效果 */
+.clickable-row {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.clickable-row:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  transform: scale(1.02) !important;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* 响应式列隐藏 */
+@media (max-width: 1600px) {
+  .rws-col, .rws-cell {
+    display: none;
+  }
+}
+
+@media (max-width: 1400px) {
+  .kast-col, .kast-cell,
+  .awp-col, .awp-cell {
+    display: none;
+  }
+}
+
+@media (max-width: 1200px) {
+  .first-death-rate-col, .first-death-rate-cell,
+  .first-kill-rate-col, .first-kill-rate-cell {
+    display: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .assists-col, .assists-cell,
+  .first-death-col, .first-death-cell,
+  .first-kill-col, .first-kill-cell {
+    display: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .headshot-col, .headshot-cell,
+  .kills-col, .kills-cell {
+    display: none;
+  }
+}
+
+/* 模态框样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(5px);
+}
+
+.player-modal {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 20px;
+  max-width: 800px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 30px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: #FFD700;
+  font-size: 1.5rem;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 2rem;
+  cursor: pointer;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: rotate(90deg);
+}
+
+.modal-content {
+  padding: 30px;
+}
+
+.player-basic-info {
+  text-align: center;
+  margin-bottom: 30px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+}
+
+.player-basic-info h3 {
+  margin: 0 0 10px 0;
+  font-size: 1.8rem;
+  color: #FFD700;
+}
+
+.player-basic-info .username {
+  color: #888;
+  margin: 5px 0;
+}
+
+.player-basic-info .rank {
+  font-size: 1.2rem;
+  color: #4CAF50;
+  margin: 10px 0;
+  font-weight: bold;
+}
+
+.player-basic-info .matches {
+  color: #b0b0b0;
+  margin: 5px 0;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.stat-group {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stat-group h4 {
+  margin: 0 0 15px 0;
+  color: #FFD700;
+  font-size: 1.1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 10px;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.stat-item:last-child {
+  border-bottom: none;
+}
+
+.stat-label {
+  color: #b0b0b0;
+  font-size: 0.9rem;
+}
+
+.stat-value {
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+/* 滚动条样式 */
+.leaderboard-table-container::-webkit-scrollbar {
+  height: 8px;
+}
+
+.leaderboard-table-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.leaderboard-table-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+
+.leaderboard-table-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.player-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.player-modal::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.player-modal::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+
+.player-modal::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
