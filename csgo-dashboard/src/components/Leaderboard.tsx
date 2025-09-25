@@ -77,9 +77,13 @@ const Leaderboard: React.FC = () => {
       case 'first_kill_rate':
       case 'first_death_rate':
         return (value * 100).toFixed(1) + '%';
-      case 'kills':
-      case 'first_kill':
-      case 'awp_kills':
+      case 'avg_kills':
+      case 'avg_assists':
+      case 'avg_deaths':
+      case 'avg_first_kill':
+      case 'avg_first_death':
+      case 'avg_awp_kills':
+        return value.toFixed(2);
       case 'mvp_count':
         return Math.round(value).toString();
       default:
@@ -194,6 +198,7 @@ const Leaderboard: React.FC = () => {
               <th className="mvp-col">MVP</th>
               <th className="kills-col">击杀</th>
               <th className="assists-col">助攻</th>
+              <th className="deaths-col">死亡</th>
               <th className="headshot-col">爆头率</th>
               <th className="first-kill-col">首杀</th>
               <th className="first-death-col">首死</th>
@@ -257,19 +262,22 @@ const Leaderboard: React.FC = () => {
                   {player.stats.mvp_count}
                 </td>
                 <td className="kills-cell">
-                  {player.stats.total_kills}
+                  {player.stats.avg_kills.toFixed(2)}
                 </td>
                 <td className="assists-cell">
-                  {player.stats.total_assists}
+                  {player.stats.avg_assists.toFixed(2)}
+                </td>
+                <td className="deaths-cell">
+                  {player.stats.avg_deaths.toFixed(2)}
                 </td>
                 <td className="headshot-cell">
                   {(player.stats.avg_headshot_rate * 100).toFixed(1)}%
                 </td>
                 <td className="first-kill-cell">
-                  {player.stats.total_first_kills}
+                  {player.stats.avg_first_kill.toFixed(2)}
                 </td>
                 <td className="first-death-cell">
-                  {player.stats.total_first_deaths}
+                  {player.stats.avg_first_death.toFixed(2)}
                 </td>
                 <td className="first-kill-rate-cell">
                   {(player.stats.first_kill_rate * 100).toFixed(1)}%
@@ -278,7 +286,7 @@ const Leaderboard: React.FC = () => {
                   {(player.stats.first_death_rate * 100).toFixed(1)}%
                 </td>
                 <td className="awp-cell">
-                  {player.stats.total_awp_kills}
+                  {player.stats.avg_awp_kills.toFixed(2)}
                 </td>
                 <td className="kast-cell">
                   {(player.stats.avg_kast * 100).toFixed(1)}%
@@ -351,38 +359,38 @@ const Leaderboard: React.FC = () => {
                 </div>
 
                 <div className="stat-group">
-                  <h4>击杀统计</h4>
+                  <h4>场均数据</h4>
                   <div className="stat-item">
-                    <span className="stat-label">总击杀:</span>
-                    <span className="stat-value">{selectedPlayer.stats.total_kills}</span>
+                    <span className="stat-label">场均击杀:</span>
+                    <span className="stat-value">{selectedPlayer.stats.avg_kills.toFixed(2)}</span>
                   </div>
                   <div className="stat-item">
-                    <span className="stat-label">总死亡:</span>
-                    <span className="stat-value">{selectedPlayer.stats.total_deaths}</span>
+                    <span className="stat-label">场均死亡:</span>
+                    <span className="stat-value">{selectedPlayer.stats.avg_deaths.toFixed(2)}</span>
                   </div>
                   <div className="stat-item">
-                    <span className="stat-label">总助攻:</span>
-                    <span className="stat-value">{selectedPlayer.stats.total_assists}</span>
+                    <span className="stat-label">场均助攻:</span>
+                    <span className="stat-value">{selectedPlayer.stats.avg_assists.toFixed(2)}</span>
                   </div>
                   <div className="stat-item">
                     <span className="stat-label">爆头率:</span>
                     <span className="stat-value">{(selectedPlayer.stats.avg_headshot_rate * 100).toFixed(1)}%</span>
                   </div>
                   <div className="stat-item">
-                    <span className="stat-label">AWP击杀:</span>
-                    <span className="stat-value">{selectedPlayer.stats.total_awp_kills}</span>
+                    <span className="stat-label">场均AWP击杀:</span>
+                    <span className="stat-value">{selectedPlayer.stats.avg_awp_kills.toFixed(2)}</span>
                   </div>
                 </div>
 
                 <div className="stat-group">
                   <h4>首杀/首死统计</h4>
                   <div className="stat-item">
-                    <span className="stat-label">首杀数:</span>
-                    <span className="stat-value">{selectedPlayer.stats.total_first_kills}</span>
+                    <span className="stat-label">场均首杀:</span>
+                    <span className="stat-value">{selectedPlayer.stats.avg_first_kill.toFixed(2)}</span>
                   </div>
                   <div className="stat-item">
-                    <span className="stat-label">首死数:</span>
-                    <span className="stat-value">{selectedPlayer.stats.total_first_deaths}</span>
+                    <span className="stat-label">场均首死:</span>
+                    <span className="stat-value">{selectedPlayer.stats.avg_first_death.toFixed(2)}</span>
                   </div>
                   <div className="stat-item">
                     <span className="stat-label">首杀率:</span>
