@@ -955,32 +955,32 @@ def get_leaderboard():
         # 获取查询参数
         stat_type = request.args.get('stat', 'rating2')  # 排行榜类型
         map_filter = request.args.get('map', '')  # 地图筛选
-        
+
         # 验证排行榜类型
         valid_stats = {
-            'rating2': 'AVG(rating2)',
-            'rating': 'AVG(rating)',
-            'adr': 'AVG(adr)',
-            'kd_ratio': 'SUM(kills) / NULLIF(SUM(deaths), 0)',
-            'kills': 'SUM(kills)',
-            'headshot_rate': 'AVG(per_headshot)',
-            'first_kill': 'SUM(first_kill)',
-            'first_death': 'SUM(first_death)',
-            'first_kill_rate': 'SUM(mps.first_kill) / NULLIF(SUM(m.round_total), 0)',
-            'first_death_rate': 'SUM(mps.first_death) / NULLIF(SUM(m.round_total), 0)',
-            'awp_kills': 'SUM(awp_kill)',
-            'mvp_count': 'SUM(CASE WHEN is_mvp = 1 THEN 1 ELSE 0 END)',
-            'win_rate': 'AVG(CASE WHEN is_win = 1 THEN 1 ELSE 0 END)',
-            'kast': 'AVG(kast)',
-            'rws': 'AVG(rws)'
+            'rating2': 'AVG(mps.rating2)',
+            'rating': 'AVG(mps.rating)',
+            'adr': 'AVG(mps.adr)',
+            'kd_ratio': 'SUM(mps.kills) / NULLIF(SUM(mps.deaths), 0)',
+            'kills': 'SUM(mps.kills)',
+            'headshot_rate': 'AVG(mps.per_headshot)',
+            'first_kill': 'SUM(mps.first_kill)',
+            'first_death': 'SUM(mps.first_death)',
+            'first_kill_rate': 'SUM(mps.first_kill) / NULLIF(SUM(mps.round_total), 0)',
+            'first_death_rate': 'SUM(mps.first_death) / NULLIF(SUM(mps.round_total), 0)',
+            'awp_kills': 'SUM(mps.awp_kill)',
+            'mvp_count': 'SUM(CASE WHEN m.mvp_uid = mps.steam_id THEN 1 ELSE 0 END)',
+            'win_rate': 'SUM(CASE WHEN m.match_winner = mps.team_id AND m.match_winner != 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(DISTINCT mps.match_id), 0)',
+            'kast': 'AVG(mps.kast)',
+            'rws': 'AVG(mps.rws)'
         }
-        
+
         if stat_type not in valid_stats:
             return jsonify({'error': '无效的排行榜类型'}), 400
-        
+
         # 构建基础查询
         base_query = f"""
-        SELECT 
+        SELECT
             p.username,
             p.nickname,
             p.platform_level,
@@ -1000,8 +1000,8 @@ def get_leaderboard():
             SUM(mps.first_kill) / NULLIF(SUM(m.round_total), 0) as first_kill_rate,
             SUM(mps.first_death) / NULLIF(SUM(m.round_total), 0) as first_death_rate,
             SUM(mps.awp_kill) as total_awp_kills,
-            SUM(CASE WHEN m.mvp_uid = mps.uid THEN 1 ELSE 0 END) as mvp_count,
-            AVG(CASE WHEN m.match_winner = mps.team_id THEN 1 ELSE 0 END) as win_rate,
+            SUM(CASE WHEN m.mvp_uid = mps.steam_id THEN 1 ELSE 0 END) as mvp_count,
+            SUM(CASE WHEN m.match_winner = mps.team_id AND m.match_winner != 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(DISTINCT mps.match_id), 0) as win_rate,
             AVG(mps.kast) as avg_kast,
             AVG(mps.rws) as avg_rws,
             MAX(m.start_time) as last_match_time
@@ -1010,26 +1010,26 @@ def get_leaderboard():
         JOIN matches m ON mps.match_id = m.match_id
         WHERE 1=1
         """
-        
+
         params = []
-        
+
         # 添加筛选条件
         if map_filter:
             base_query += " AND m.map_name = %s"
             params.append(map_filter)
         
-        # 分组和排序
+        # 分组和排序 - 使用原始统计表达式而不是别名，以避免NULL值排序问题
         base_query += f"""
         GROUP BY p.uid, p.username, p.nickname, p.platform_level, p.steam_id
-        ORDER BY stat_value DESC
+        ORDER BY {valid_stats[stat_type]} DESC NULLS LAST
         """
-        
+
         # 执行查询
         result = execute_query(base_query, params)
-        
+
         if result is None:
             return jsonify({'error': '数据库查询失败'}), 500
-        
+
         # 格式化结果
         leaderboard_data = []
         for i, row in enumerate(result):
@@ -1040,30 +1040,30 @@ def get_leaderboard():
                 'platform_level': row['platform_level'],
                 'steam_id': row['steam_id'],
                 'total_matches': row['total_matches'],
-                'stat_value': round(float(row['stat_value']) if row['stat_value'] else 0, 3),
+                'stat_value': round(float(row['stat_value']) if row['stat_value'] is not None else 0, 3),
                 'stats': {
-                    'avg_rating2': round(float(row['avg_rating2']) if row['avg_rating2'] else 0, 3),
-                    'avg_rating': round(float(row['avg_rating']) if row['avg_rating'] else 0, 3),
-                    'avg_adr': round(float(row['avg_adr']) if row['avg_adr'] else 0, 2),
-                    'kd_ratio': round(float(row['kd_ratio']) if row['kd_ratio'] else 0, 2),
-                    'total_kills': row['total_kills'],
-                    'total_deaths': row['total_deaths'],
-                    'total_assists': row['total_assists'],
-                    'avg_headshot_rate': round(float(row['avg_headshot_rate']) if row['avg_headshot_rate'] else 0, 3),
-                    'total_first_kills': row['total_first_kills'],
-                    'total_first_deaths': row['total_first_deaths'],
-                    'first_kill_rate': round(float(row['first_kill_rate']) if row['first_kill_rate'] else 0, 3),
-                    'first_death_rate': round(float(row['first_death_rate']) if row['first_death_rate'] else 0, 3),
-                    'total_awp_kills': row['total_awp_kills'],
-                    'mvp_count': row['mvp_count'],
-                    'win_rate': round(float(row['win_rate']) if row['win_rate'] else 0, 3),
-                    'avg_kast': round(float(row['avg_kast']) if row['avg_kast'] else 0, 3),
-                    'avg_rws': round(float(row['avg_rws']) if row['avg_rws'] else 0, 2)
+                    'avg_rating2': round(float(row['avg_rating2']) if row['avg_rating2'] is not None else 0, 3),
+                    'avg_rating': round(float(row['avg_rating']) if row['avg_rating'] is not None else 0, 3),
+                    'avg_adr': round(float(row['avg_adr']) if row['avg_adr'] is not None else 0, 2),
+                    'kd_ratio': round(float(row['kd_ratio']) if row['kd_ratio'] is not None else 0, 2),
+                    'total_kills': row['total_kills'] or 0,
+                    'total_deaths': row['total_deaths'] or 0,
+                    'total_assists': row['total_assists'] or 0,
+                    'avg_headshot_rate': round(float(row['avg_headshot_rate']) if row['avg_headshot_rate'] is not None else 0, 3),
+                    'total_first_kills': row['total_first_kills'] or 0,
+                    'total_first_deaths': row['total_first_deaths'] or 0,
+                    'first_kill_rate': round(float(row['first_kill_rate']) if row['first_kill_rate'] is not None else 0, 3),
+                    'first_death_rate': round(float(row['first_death_rate']) if row['first_death_rate'] is not None else 0, 3),
+                    'total_awp_kills': row['total_awp_kills'] or 0,
+                    'mvp_count': row['mvp_count'] or 0,
+                    'win_rate': round(float(row['win_rate']) if row['win_rate'] is not None else 0, 3),
+                    'avg_kast': round(float(row['avg_kast']) if row['avg_kast'] is not None else 0, 3),
+                    'avg_rws': round(float(row['avg_rws']) if row['avg_rws'] is not None else 0, 2)
                 },
                 'last_match_time': row['last_match_time']
             }
             leaderboard_data.append(player_data)
-        
+
         return jsonify({
             'success': True,
             'data': leaderboard_data,
@@ -1073,7 +1073,7 @@ def get_leaderboard():
                 'map_filter': map_filter
             }
         })
-        
+
     except Exception as e:
         logger.error(f"获取排行榜数据失败: {e}")
         return jsonify({'error': f'获取排行榜数据失败: {str(e)}'}), 500
@@ -1088,8 +1088,8 @@ def get_leaderboard_stats_types():
         {'key': 'kd_ratio', 'name': 'K/D比', 'description': '击杀死亡比'},
         {'key': 'kills', 'name': '总击杀', 'description': '总击杀数'},
         {'key': 'headshot_rate', 'name': '爆头率', 'description': '平均爆头率'},
-        {'key': 'first_kill', 'name': '首杀', 'description': '总首杀数'},
-        {'key': 'first_death', 'name': '总首死', 'description': '总首死数'},
+        {'key': 'first_kill', 'name': '首杀数', 'description': '总首杀数'},
+        {'key': 'first_death', 'name': '首死数', 'description': '总首死数'},
         {'key': 'first_kill_rate', 'name': '首杀率', 'description': '首杀率（首杀数/总回合数）'},
         {'key': 'first_death_rate', 'name': '首死率', 'description': '首死率（首死数/总回合数）'},
         {'key': 'awp_kills', 'name': 'AWP击杀', 'description': '总AWP击杀数'},
