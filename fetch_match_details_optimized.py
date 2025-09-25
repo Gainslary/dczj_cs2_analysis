@@ -562,6 +562,27 @@ class MatchDetailsFetcherOptimized:
                 updated_at = CURRENT_TIMESTAMP
             """
             
+            # 处理damage_stats和damage_receive字段，确保为整数类型
+            damage_stats = stats.get('damage_stats', 0)
+            damage_receive = stats.get('damage_receive', 0)
+
+            # 如果是字典类型，尝试提取数值
+            if isinstance(damage_stats, dict):
+                damage_stats = damage_stats.get('total', 0) or 0
+            if isinstance(damage_receive, dict):
+                damage_receive = damage_receive.get('total', 0) or 0
+
+            # 确保是整数
+            try:
+                damage_stats = int(damage_stats)
+            except (ValueError, TypeError):
+                damage_stats = 0
+
+            try:
+                damage_receive = int(damage_receive)
+            except (ValueError, TypeError):
+                damage_receive = 0
+
             params = {
                 'match_id': match_id,
                 'steam_id': steam_id,
@@ -571,8 +592,8 @@ class MatchDetailsFetcherOptimized:
                 'awp_kill': stats.get('awp_kill', 0),
                 'awp_kill_ct': stats.get('awp_kill_ct', 0),
                 'awp_kill_t': stats.get('awp_kill_t', 0),
-                'damage_stats': stats.get('damage_stats', 0),
-                'damage_receive': stats.get('damage_receive', 0)
+                'damage_stats': damage_stats,
+                'damage_receive': damage_receive
             }
             
             cursor.execute(sql, params)

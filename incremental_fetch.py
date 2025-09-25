@@ -220,15 +220,44 @@ class IncrementalMatchFetcher:
     
     def fetch_match_detail(self, match_id: str) -> Optional[Dict[str, Any]]:
         """获取比赛详情数据"""
+        return self._fetch_match_detail_with_retry(match_id)
+
+    def _fetch_match_detail_with_retry(self, match_id: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+        """带重试的比赛详情获取"""
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"获取比赛详情 (尝试 {attempt + 1}/{max_retries}): {match_id}")
+                detail_data = self._fetch_match_detail_single(match_id)
+
+                if detail_data:
+                    return detail_data
+
+                # 如果不是最后一次重试，等待一段时间
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 8)  # 指数退避，最多等待8秒
+                    self.logger.info(f"获取比赛详情失败，等待 {wait_time} 秒后重试: {match_id}")
+                    time.sleep(wait_time)
+
+            except Exception as e:
+                self.logger.error(f"获取比赛详情异常 (尝试 {attempt + 1}/{max_retries}): {match_id}, 错误: {e}")
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 8)
+                    time.sleep(wait_time)
+
+        self.logger.error(f"比赛详情获取失败，已重试 {max_retries} 次: {match_id}")
+        return None
+
+    def _fetch_match_detail_single(self, match_id: str) -> Optional[Dict[str, Any]]:
+        """单次获取比赛详情数据"""
         url = f"{self.base_url_detail}{match_id}"
-        
+
         try:
             response = requests.get(url, headers=self.headers, timeout=30)
             response.raise_for_status()
-            
+
             # 首先尝试直接解析响应文本
             content = response.text
-            
+
             # 如果响应内容以非JSON字符开头，尝试解压或记录错误
             if not content.strip().startswith(('{', '[')):
                 # 记录原始响应信息用于调试
@@ -237,15 +266,15 @@ class IncrementalMatchFetcher:
                 self.logger.warning(f"响应头: {dict(response.headers)}")
                 self.logger.warning(f"响应内容长度: {len(response.content)}")
                 self.logger.warning(f"响应开头: {content[:200]}")
-                
+
                 # 尝试解压（作为备用方案）
                 content = self._decompress_response(response.content, match_id, "Match Detail")
                 if content is None:
                     return None
-            
+
             # 使用解析的内容
             data = json.loads(content)
-            
+
             # 检查API返回状态
             if data.get('code') == 0:  # 5E API成功状态码是0
                 self.logger.info(f"Match Detail API调用成功: {match_id}")
@@ -253,7 +282,7 @@ class IncrementalMatchFetcher:
             else:
                 self.logger.warning(f"Match Detail API返回错误: {match_id}, code: {data.get('code')}, message: {data.get('message')}")
                 return None
-                
+
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Match Detail API请求失败: {match_id}, 错误: {e}")
             return None
@@ -266,15 +295,44 @@ class IncrementalMatchFetcher:
     
     def fetch_vip_plus_data(self, match_id: str) -> Optional[Dict[str, Any]]:
         """获取VIP Plus数据"""
+        return self._fetch_vip_plus_data_with_retry(match_id)
+
+    def _fetch_vip_plus_data_with_retry(self, match_id: str, max_retries: int = 2) -> Optional[Dict[str, Any]]:
+        """带重试的VIP Plus数据获取"""
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"获取VIP Plus数据 (尝试 {attempt + 1}/{max_retries}): {match_id}")
+                vip_data = self._fetch_vip_plus_data_single(match_id)
+
+                if vip_data:
+                    return vip_data
+
+                # 如果不是最后一次重试，等待一段时间
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 4)  # 指数退避，最多等待4秒
+                    self.logger.info(f"获取VIP Plus数据失败，等待 {wait_time} 秒后重试: {match_id}")
+                    time.sleep(wait_time)
+
+            except Exception as e:
+                self.logger.error(f"获取VIP Plus数据异常 (尝试 {attempt + 1}/{max_retries}): {match_id}, 错误: {e}")
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 4)
+                    time.sleep(wait_time)
+
+        self.logger.warning(f"VIP Plus数据获取失败，已重试 {max_retries} 次: {match_id}")
+        return None
+
+    def _fetch_vip_plus_data_single(self, match_id: str) -> Optional[Dict[str, Any]]:
+        """单次获取VIP Plus数据"""
         url = f"{self.base_url_vip}{match_id}"
-        
+
         try:
             response = requests.get(url, headers=self.headers, timeout=30)
             response.raise_for_status()
-            
+
             # 首先尝试直接解析响应文本
             content = response.text
-            
+
             # 如果响应内容以非JSON字符开头，尝试解压或记录错误
             if not content.strip().startswith(('{', '[')):
                 # 记录原始响应信息用于调试
@@ -283,15 +341,15 @@ class IncrementalMatchFetcher:
                 self.logger.warning(f"响应头: {dict(response.headers)}")
                 self.logger.warning(f"响应内容长度: {len(response.content)}")
                 self.logger.warning(f"响应开头: {content[:200]}")
-                
+
                 # 尝试解压（作为备用方案）
                 content = self._decompress_response(response.content, match_id, "VIP Plus")
                 if content is None:
                     return None
-            
+
             # 使用解析的内容
             data = json.loads(content)
-            
+
             # 检查API返回状态
             if data.get('code') == 0:  # 5E API成功状态码是0
                 self.logger.info(f"VIP Plus API调用成功: {match_id}")
@@ -299,7 +357,7 @@ class IncrementalMatchFetcher:
             else:
                 self.logger.warning(f"VIP Plus API返回错误: {match_id}, code: {data.get('code')}, message: {data.get('message')}")
                 return None
-                
+
         except requests.exceptions.RequestException as e:
             self.logger.error(f"VIP Plus API请求失败: {match_id}, 错误: {e}")
             return None
@@ -325,45 +383,41 @@ class IncrementalMatchFetcher:
             self.logger.error(f"检查比赛是否存在时出错: {match_id}, 错误: {e}")
             return False
     
-    def insert_match_data(self, match_data: Dict[str, Any], detail_data: Optional[Dict[str, Any]] = None, 
+    def insert_match_data(self, match_data: Dict[str, Any], detail_data: Optional[Dict[str, Any]] = None,
                          vip_data: Optional[Dict[str, Any]] = None) -> bool:
         """插入比赛数据到数据库"""
         if not self.db_connection:
             return False
-            
+
         try:
+            # 验证数据完整性
+            if not self._validate_match_data(match_data):
+                self.logger.error(f"比赛数据验证失败: {match_data.get('match_id')}")
+                return False
+
             with self.db_connection.cursor() as cursor:
-                # 合并比赛列表数据和详情数据
-                merged_data = match_data.copy()
-                if detail_data:
-                    # 从详情数据中获取match_code等关键字段
-                    merged_data.update(detail_data)
-                    # 确保match_code字段存在
-                    if 'match_code' not in merged_data or not merged_data['match_code']:
-                        merged_data['match_code'] = match_data.get('match_id', '')
-                else:
-                    # 如果没有详情数据，使用match_id作为match_code
-                    merged_data['match_code'] = match_data.get('match_id', '')
-                
+                # 智能合并比赛数据
+                merged_data = self._merge_match_data(match_data, detail_data)
+
                 # 保存比赛基本信息
                 self._save_match_info(cursor, match_data.get('match_id'), merged_data)
-                
+
                 # 保存详情数据
                 if detail_data:
                     # 保存玩家数据
                     self._save_players_data(cursor, match_data.get('match_id'), detail_data)
-                
+
                 # 保存VIP Plus数据
                 if vip_data:
                     self._save_vip_plus_stats(cursor, match_data.get('match_id'), vip_data)
-                
+
                 # 记录采集日志
                 self._log_collection_status(cursor, match_data.get('match_id'), 'match_detail', 'success' if detail_data else 'failed')
                 self._log_collection_status(cursor, match_data.get('match_id'), 'vip_plus', 'success' if vip_data else 'failed')
-                
+
                 self.logger.info(f"比赛数据插入成功: {match_data.get('match_id')}")
                 return True
-                
+
         except Exception as e:
             self.logger.error(f"插入比赛数据时出错: {match_data.get('match_id')}, 错误: {e}")
             if 'cursor' in locals():
@@ -465,6 +519,75 @@ class IncrementalMatchFetcher:
         
         cursor.execute(sql, params)
         self.logger.debug(f"比赛信息保存成功: {match_id}")
+
+    def _validate_match_data(self, match_data: Dict[str, Any]) -> bool:
+        """验证比赛数据完整性"""
+        if not match_data:
+            return False
+
+        # 必需字段检查
+        required_fields = ['match_id', 'start_time', 'game_mode']
+        for field in required_fields:
+            if field not in match_data or not match_data[field]:
+                self.logger.warning(f"比赛数据缺少必需字段 {field}: {match_data.get('match_id')}")
+                return False
+
+        return True
+
+    def _merge_match_data(self, list_data: Dict[str, Any], detail_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """智能合并比赛数据"""
+        merged_data = list_data.copy()
+
+        if detail_data:
+            # 从详情数据中获取主要信息
+            main_info = detail_data.get('main', {})
+            if main_info:
+                # 优先使用详情数据中的关键字段
+                key_fields = [
+                    'match_code', 'game_name', 'map', 'map_desc', 'end_time',
+                    'round_total', 'group1_all_score', 'group2_all_score',
+                    'group1_fh_score', 'group1_sh_score', 'group2_fh_score', 'group2_sh_score',
+                    'group1_fh_role', 'group2_fh_role', 'group1_sh_role', 'group2_sh_role',
+                    'group1_uids', 'group2_uids', 'match_winner', 'knife_winner',
+                    'knife_winner_role', 'group1_origin_elo', 'group1_change_elo',
+                    'group2_origin_elo', 'group2_change_elo', 'demo_url', 'location',
+                    'location_full', 'server_ip', 'server_port', 'season', 'year',
+                    'match_mode', 'mvp_uid', 'most_kill_uid', 'most_assist_uid',
+                    'most_awp_uid', 'most_headshot_uid', 'most_first_kill_uid',
+                    'most_1v2_uid', 'most_jump_uid', 'most_end_uid'
+                ]
+
+                for field in key_fields:
+                    if field in main_info and main_info[field] is not None:
+                        merged_data[field] = main_info[field]
+
+        # 确保关键字段存在
+        if 'match_code' not in merged_data or not merged_data['match_code']:
+            merged_data['match_code'] = list_data.get('match_id', '')
+
+        # 确保map_name字段正确
+        if 'map' in merged_data:
+            merged_data['map_name'] = merged_data['map']
+        elif 'map_name' not in merged_data:
+            merged_data['map_name'] = None
+
+        # 设置默认值
+        default_values = {
+            'status': 1,
+            'waiver': 0,
+            'cs_type': 0,
+            'priority_show_type': 0,
+            'pug10m_show_type': 0,
+            'credit_match_status': 0,
+            'group1_uids': [],
+            'group2_uids': []
+        }
+
+        for field, default_value in default_values.items():
+            if field not in merged_data or merged_data[field] is None:
+                merged_data[field] = default_value
+
+        return merged_data
 
     def _save_players_data(self, cursor, match_id: str, match_detail: Dict):
         """保存玩家数据"""
@@ -708,6 +831,27 @@ class IncrementalMatchFetcher:
                 updated_at = CURRENT_TIMESTAMP
             """
             
+            # 处理damage_stats和damage_receive字段，确保为整数类型
+            damage_stats = stats.get('damage_stats', 0)
+            damage_receive = stats.get('damage_receive', 0)
+
+            # 如果是字典类型，尝试提取数值
+            if isinstance(damage_stats, dict):
+                damage_stats = damage_stats.get('total', 0) or 0
+            if isinstance(damage_receive, dict):
+                damage_receive = damage_receive.get('total', 0) or 0
+
+            # 确保是整数
+            try:
+                damage_stats = int(damage_stats)
+            except (ValueError, TypeError):
+                damage_stats = 0
+
+            try:
+                damage_receive = int(damage_receive)
+            except (ValueError, TypeError):
+                damage_receive = 0
+
             params = {
                 'match_id': match_id,
                 'steam_id': steam_id,
@@ -717,29 +861,29 @@ class IncrementalMatchFetcher:
                 'awp_kill': stats.get('awp_kill', 0),
                 'awp_kill_ct': stats.get('awp_kill_ct', 0),
                 'awp_kill_t': stats.get('awp_kill_t', 0),
-                'damage_stats': json.dumps(stats.get('damage_stats', {}), ensure_ascii=False),
-                'damage_receive': json.dumps(stats.get('damage_receive', {}), ensure_ascii=False)
+                'damage_stats': damage_stats,
+                'damage_receive': damage_receive
             }
             
             cursor.execute(sql, params)
 
-    def _log_collection_status(self, cursor, match_id: str, data_type: str, status: str, error_msg: str = None):
+    def _log_collection_status(self, cursor, match_id: str, api_type: str, status: str, error_message: str = None):
         """记录采集状态"""
         sql = """
         INSERT INTO data_collection_logs (
-            match_id, data_type, status, error_message, created_at
+            match_id, api_type, status, error_message, created_at
         ) VALUES (
-            %(match_id)s, %(data_type)s, %(status)s, %(error_message)s, NOW()
+            %(match_id)s, %(api_type)s, %(status)s, %(error_message)s, NOW()
         )
         """
-        
+
         params = {
             'match_id': match_id,
-            'data_type': data_type,
+            'api_type': api_type,
             'status': status,
-            'error_message': error_msg
+            'error_message': error_message
         }
-        
+
         cursor.execute(sql, params)
     
     def _load_state(self) -> Dict[str, Any]:
@@ -939,126 +1083,165 @@ class IncrementalMatchFetcher:
     def run_incremental_fetch(self) -> Dict[str, Any]:
         """
         执行增量抓取
-        
+
         Returns:
             抓取结果统计
         """
         start_time = datetime.now()
-        self.logger.info("开始执行增量抓取任务")
-        
+        self.logger.info("=== 开始执行增量抓取任务 ===")
+
         # 统计变量
         db_inserted_count = 0
         db_failed_count = 0
         detail_fetched_count = 0
         detail_failed_count = 0
-        
+        vip_fetched_count = 0
+        vip_failed_count = 0
+        skipped_count = 0
+
         try:
             # 如果需要获取详情，先连接数据库
             if self.fetch_details and not self.connect_database():
                 self.logger.warning("数据库连接失败，将只保存到文件")
                 self.fetch_details = False
-            
+
             # 获取新的比赛数据
+            self.logger.info("正在获取新的比赛数据...")
             new_matches = self._fetch_incremental_data()
-            
+
             if new_matches:
-                self.logger.info(f"开始处理 {len(new_matches)} 条新比赛数据")
-                
+                self.logger.info(f"✅ 发现 {len(new_matches)} 条新比赛数据，开始处理...")
+
                 # 如果启用了详情获取，处理每个新比赛
                 if self.fetch_details:
+                    failed_matches = []  # 记录失败的比赛，用于后续分析
+
                     for i, match in enumerate(new_matches, 1):
                         match_id = match.get('match_id')
-                        self.logger.info(f"处理比赛 {i}/{len(new_matches)}: {match_id}")
-                        
+                        self.logger.info(f"🔄 处理比赛 [{i}/{len(new_matches)}]: {match_id}")
+
                         try:
                             # 检查比赛是否已存在于数据库
                             if self.check_match_exists(match_id):
-                                self.logger.info(f"比赛 {match_id} 已存在于数据库，跳过")
+                                self.logger.info(f"⏭️  比赛 {match_id} 已存在于数据库，跳过")
+                                skipped_count += 1
                                 continue
-                            
+
+                            # 验证数据完整性
+                            if not self._validate_match_data(match):
+                                self.logger.warning(f"⚠️  比赛 {match_id} 数据验证失败，跳过")
+                                db_failed_count += 1
+                                failed_matches.append(match_id)
+                                continue
+
                             # 获取比赛详情
                             detail_data = self.fetch_match_detail(match_id)
                             if detail_data:
                                 detail_fetched_count += 1
-                                self.logger.info(f"成功获取比赛详情: {match_id}")
+                                self.logger.info(f"✅ 成功获取比赛详情: {match_id}")
                             else:
                                 detail_failed_count += 1
-                                self.logger.warning(f"获取比赛详情失败: {match_id}")
-                            
+                                self.logger.warning(f"❌ 获取比赛详情失败: {match_id}")
+
                             # 获取VIP数据（可选）
                             vip_data = self.fetch_vip_plus_data(match_id)
                             if vip_data:
-                                self.logger.info(f"成功获取VIP数据: {match_id}")
-                            
+                                vip_fetched_count += 1
+                                self.logger.info(f"✅ 成功获取VIP数据: {match_id}")
+                            else:
+                                vip_failed_count += 1
+                                self.logger.debug(f"VIP数据获取失败: {match_id}")
+
                             # 插入数据库
                             if self.insert_match_data(match, detail_data, vip_data):
                                 db_inserted_count += 1
-                                self.logger.info(f"成功插入数据库: {match_id}")
+                                self.logger.info(f"✅ 成功插入数据库: {match_id}")
                             else:
                                 db_failed_count += 1
-                                self.logger.error(f"插入数据库失败: {match_id}")
-                            
-                            # 添加延迟避免请求过于频繁
-                            time.sleep(1)
-                            
+                                self.logger.error(f"❌ 插入数据库失败: {match_id}")
+                                failed_matches.append(match_id)
+
+                            # 动态调整延迟时间
+                            delay = self._get_dynamic_delay(i, len(new_matches))
+                            if delay > 0:
+                                time.sleep(delay)
+
                         except Exception as e:
-                            self.logger.error(f"处理比赛 {match_id} 时出错: {e}")
+                            self.logger.error(f"❌ 处理比赛 {match_id} 时出错: {e}")
                             db_failed_count += 1
+                            failed_matches.append(match_id)
                             continue
-                
+
+                    # 输出失败比赛的统计信息
+                    if failed_matches:
+                        self.logger.warning(f"❌ 处理失败的比赛列表: {failed_matches[:10]}{'...' if len(failed_matches) > 10 else ''}")
+                        self.logger.warning(f"❌ 总共失败 {len(failed_matches)} 场比赛")
+
                 # 加载现有数据
                 existing_matches = self._load_existing_matches()
-                
+
                 # 合并数据
                 all_matches = existing_matches + new_matches
-                
+
                 # 按时间倒序排序
-                all_matches.sort(key=lambda x: int(x['start_time']), reverse=True)
-                
+                try:
+                    all_matches.sort(key=lambda x: int(x['start_time']), reverse=True)
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(f"排序失败: {e}，保持原始顺序")
+
                 # 保存合并后的数据
                 self._save_matches(all_matches)
-                
+
                 # 更新状态
                 new_match_ids = [match['match_id'] for match in new_matches]
                 self.state["known_match_ids"].extend(new_match_ids)
                 self.state["last_fetch_time"] = int(start_time.timestamp())
                 self.state["total_matches"] = len(all_matches)
-                
+
                 # 保持known_match_ids列表不要太大（只保留最近的10000个）
                 if len(self.state["known_match_ids"]) > 10000:
+                    removed_count = len(self.state["known_match_ids"]) - 10000
                     self.state["known_match_ids"] = self.state["known_match_ids"][-10000:]
-                
+                    self.logger.info(f"清理了 {removed_count} 个旧的match_id记录")
+
                 self._save_state()
-                
-                self.logger.info(f"增量抓取成功完成，新增 {len(new_matches)} 条记录")
+
+                self.logger.info(f"🎉 增量抓取成功完成，新增 {len(new_matches)} 条记录")
                 if self.fetch_details:
-                    self.logger.info(f"数据库操作统计: 插入成功 {db_inserted_count}, 插入失败 {db_failed_count}")
-                    self.logger.info(f"详情获取统计: 成功 {detail_fetched_count}, 失败 {detail_failed_count}")
-                
+                    self.logger.info(f"📊 数据库操作统计: ✅插入成功 {db_inserted_count}, ❌插入失败 {db_failed_count}, ⏭️跳过 {skipped_count}")
+                    self.logger.info(f"📊 详情获取统计: ✅成功 {detail_fetched_count}, ❌失败 {detail_failed_count}")
+                    self.logger.info(f"📊 VIP数据统计: ✅成功 {vip_fetched_count}, ❌失败 {vip_failed_count}")
+
             else:
-                self.logger.info("没有发现新的比赛数据")
+                self.logger.info("📝 没有发现新的比赛数据")
                 # 仍然更新最后抓取时间
                 self.state["last_fetch_time"] = int(start_time.timestamp())
                 self._save_state()
-            
+
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
-            
-            return {
+
+            result = {
                 "success": True,
                 "new_matches_count": len(new_matches),
                 "total_matches": self.state["total_matches"],
                 "db_inserted_count": db_inserted_count,
                 "db_failed_count": db_failed_count,
+                "skipped_count": skipped_count,
                 "detail_fetched_count": detail_fetched_count,
                 "detail_failed_count": detail_failed_count,
+                "vip_fetched_count": vip_fetched_count,
+                "vip_failed_count": vip_failed_count,
                 "duration_seconds": duration,
                 "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
                 "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S')
             }
-            
+
+            self.logger.info(f"📈 执行统计: {result}")
+            return result
+
         except Exception as e:
-            self.logger.error(f"增量抓取失败: {e}")
+            self.logger.error(f"❌ 增量抓取失败: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -1068,20 +1251,68 @@ class IncrementalMatchFetcher:
             # 确保关闭数据库连接
             if self.fetch_details:
                 self.close_database()
+            self.logger.info("=== 增量抓取任务结束 ===")
+
+    def _get_dynamic_delay(self, current_index: int, total_count: int) -> float:
+        """
+        根据进度动态调整延迟时间
+
+        Args:
+            current_index: 当前处理到第几个
+            total_count: 总数量
+
+        Returns:
+            延迟时间（秒）
+        """
+        # 根据进度调整延迟
+        progress = current_index / total_count if total_count > 0 else 0
+
+        # 初始延迟1秒，随着进度增加减少延迟，但最少保持0.5秒
+        base_delay = 1.0
+        min_delay = 0.5
+        dynamic_delay = base_delay * (1 - progress * 0.5)  # 最多减少50%
+
+        return max(min_delay, dynamic_delay)
 
 
 def main():
     """主函数"""
+    print("🚀 启动增量比赛数据抓取器...")
     fetcher = IncrementalMatchFetcher()
     result = fetcher.run_incremental_fetch()
-    
+
     if result["success"]:
-        print(f"✅ 增量抓取成功完成")
+        print("\n" + "="*60)
+        print("🎉 增量抓取成功完成!")
+        print("="*60)
         print(f"📊 新增比赛: {result['new_matches_count']} 条")
         print(f"📈 总比赛数: {result['total_matches']} 条")
         print(f"⏱️ 耗时: {result['duration_seconds']:.2f} 秒")
+
+        if result.get('db_inserted_count') is not None:
+            print(f"💾 数据库操作:")
+            print(f"   ✅ 插入成功: {result['db_inserted_count']} 条")
+            print(f"   ❌ 插入失败: {result['db_failed_count']} 条")
+            print(f"   ⏭️  跳过: {result.get('skipped_count', 0)} 条")
+
+        if result.get('detail_fetched_count') is not None:
+            print(f"🔍 详情获取:")
+            print(f"   ✅ 成功: {result['detail_fetched_count']} 条")
+            print(f"   ❌ 失败: {result['detail_failed_count']} 条")
+
+        if result.get('vip_fetched_count') is not None:
+            print(f"⭐ VIP数据:")
+            print(f"   ✅ 成功: {result['vip_fetched_count']} 条")
+            print(f"   ❌ 失败: {result['vip_failed_count']} 条")
+
+        print("="*60)
     else:
-        print(f"❌ 增量抓取失败: {result['error']}")
+        print("\n" + "="*60)
+        print("❌ 增量抓取失败!")
+        print("="*60)
+        print(f"错误信息: {result['error']}")
+        print(f"开始时间: {result.get('start_time', '未知')}")
+        print("="*60)
         exit(1)
 
 
