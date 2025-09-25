@@ -969,7 +969,7 @@ def get_leaderboard():
             'first_kill_rate': 'SUM(mps.first_kill) / NULLIF(SUM(mps.round_total), 0)',
             'first_death_rate': 'SUM(mps.first_death) / NULLIF(SUM(mps.round_total), 0)',
             'awp_kills': 'SUM(mps.awp_kill)',
-            'mvp_count': 'SUM(CASE WHEN m.mvp_uid = mps.steam_id THEN 1 ELSE 0 END)',
+            'mvp_count': 'SUM(CASE WHEN m.mvp_uid = mps.uid THEN 1 ELSE 0 END)',
             'win_rate': 'SUM(CASE WHEN m.match_winner = mps.team_id AND m.match_winner != 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(DISTINCT mps.match_id), 0)',
             'kast': 'AVG(mps.kast)',
             'rws': 'AVG(mps.rws)'
@@ -1000,7 +1000,7 @@ def get_leaderboard():
             SUM(mps.first_kill) / NULLIF(SUM(m.round_total), 0) as first_kill_rate,
             SUM(mps.first_death) / NULLIF(SUM(m.round_total), 0) as first_death_rate,
             SUM(mps.awp_kill) as total_awp_kills,
-            SUM(CASE WHEN m.mvp_uid = mps.steam_id THEN 1 ELSE 0 END) as mvp_count,
+            SUM(CASE WHEN m.mvp_uid = mps.uid THEN 1 ELSE 0 END) as mvp_count,
             SUM(CASE WHEN m.match_winner = mps.team_id AND m.match_winner != 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(DISTINCT mps.match_id), 0) as win_rate,
             AVG(mps.kast) as avg_kast,
             AVG(mps.rws) as avg_rws,
