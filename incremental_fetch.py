@@ -53,19 +53,16 @@ class IncrementalMatchFetcher:
         self.db_connection = None
         
         # API配置
-        self.base_url_match = "https://gate.5eplay.com/crane/http/api/data/match/"
+        self.base_url_detail = "https://gate.5eplay.com/crane/http/api/data/match/"
         self.base_url_vip = "https://gate.5eplay.com/crane/http/api/data/vip_plus_match_data/"
         
-        # 请求头配置
+        # 请求头配置 - 针对不同环境优化
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Encoding': 'identity',  # 禁用压缩，避免服务器端压缩问题
             'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache'
         }
@@ -126,15 +123,128 @@ class IncrementalMatchFetcher:
             self.db_connection.close()
             self.logger.info("数据库连接已关闭")
     
+    def _decompress_response(self, content_bytes: bytes, match_id: str, api_name: str) -> Optional[str]:
+        """尝试解压响应内容，支持多种压缩格式"""
+        import gzip
+        import zlib
+        import io
+        
+        # 记录原始字节信息用于调试
+        self.logger.debug(f"{api_name} 响应字节长度: {len(content_bytes)}, 前16字节: {content_bytes[:16].hex()}")
+        
+        # 尝试不同的解压方法
+        decompression_methods = [
+            ("gzip", lambda data: gzip.GzipFile(fileobj=io.BytesIO(data)).read()),
+            ("deflate", lambda data: zlib.decompress(data)),
+            ("deflate_raw", lambda data: zlib.decompress(data, -zlib.MAX_WBITS)),
+            ("brotli", lambda data: self._try_brotli_decompress(data)),
+            ("lzma", lambda data: self._try_lzma_decompress(data)),
+            ("lz4", lambda data: self._try_lz4_decompress(data))
+        ]
+        
+        for method_name, decompress_func in decompression_methods:
+            try:
+                decompressed_data = decompress_func(content_bytes)
+                if decompressed_data:
+                    content = decompressed_data.decode('utf-8')
+                    self.logger.info(f"成功使用{method_name}解压{api_name}内容: {match_id}")
+                    return content
+            except Exception as e:
+                self.logger.debug(f"{method_name}解压失败: {e}")
+                continue
+        
+        # 尝试直接以不同编码解析
+        encodings = ['utf-8', 'gbk', 'gb2312', 'latin1', 'cp1252']
+        for encoding in encodings:
+            try:
+                content = content_bytes.decode(encoding)
+                if content.strip().startswith(('{', '[')):
+                    self.logger.info(f"成功使用{encoding}编码解析{api_name}内容: {match_id}")
+                    return content
+            except Exception as e:
+                self.logger.debug(f"{encoding}编码解析失败: {e}")
+                continue
+        
+        # 所有方法都失败，记录详细信息
+        content_preview = content_bytes[:200].decode('utf-8', errors='replace')
+        hex_preview = content_bytes[:32].hex()
+        self.logger.warning(f"{api_name} API返回非JSON内容且所有解压方法都失败: {match_id}")
+        self.logger.warning(f"响应字节长度: {len(content_bytes)}, 十六进制前32字节: {hex_preview}")
+        self.logger.warning(f"响应开头: {content_preview}")
+        return None
+    
+    def _try_brotli_decompress(self, data: bytes) -> bytes:
+        """尝试brotli解压"""
+        try:
+            import brotli
+            return brotli.decompress(data)
+        except ImportError:
+            self.logger.debug("brotli模块未安装，跳过brotli解压")
+            return b""
+        except Exception:
+            return b""
+    
+    def _try_lzma_decompress(self, data: bytes) -> bytes:
+        """尝试LZMA解压"""
+        try:
+            import lzma
+            return lzma.decompress(data)
+        except ImportError:
+            self.logger.debug("lzma模块未安装，跳过lzma解压")
+            return b""
+        except Exception:
+            return b""
+    
+    def _try_lz4_decompress(self, data: bytes) -> bytes:
+        """尝试LZ4解压"""
+        try:
+            import lz4.frame
+            return lz4.frame.decompress(data)
+        except ImportError:
+            self.logger.debug("lz4模块未安装，跳过lz4解压")
+            return b""
+        except Exception:
+            return b""
+    
+    def _get_alternative_headers(self) -> Dict[str, str]:
+        """获取备用请求头配置"""
+        return {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate',  # 允许标准压缩
+            'Connection': 'keep-alive',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+        }
+    
     def fetch_match_detail(self, match_id: str) -> Optional[Dict[str, Any]]:
         """获取比赛详情数据"""
-        url = f"{self.base_url_match}{match_id}"
+        url = f"{self.base_url_detail}{match_id}"
         
         try:
             response = requests.get(url, headers=self.headers, timeout=30)
             response.raise_for_status()
             
-            data = response.json()
+            # 首先尝试直接解析响应文本
+            content = response.text
+            
+            # 如果响应内容以非JSON字符开头，尝试解压或记录错误
+            if not content.strip().startswith(('{', '[')):
+                # 记录原始响应信息用于调试
+                self.logger.warning(f"Match Detail API返回非JSON内容: {match_id}")
+                self.logger.warning(f"响应状态码: {response.status_code}")
+                self.logger.warning(f"响应头: {dict(response.headers)}")
+                self.logger.warning(f"响应内容长度: {len(response.content)}")
+                self.logger.warning(f"响应开头: {content[:200]}")
+                
+                # 尝试解压（作为备用方案）
+                content = self._decompress_response(response.content, match_id, "Match Detail")
+                if content is None:
+                    return None
+            
+            # 使用解析的内容
+            data = json.loads(content)
             
             # 检查API返回状态
             if data.get('code') == 0:  # 5E API成功状态码是0
@@ -148,7 +258,7 @@ class IncrementalMatchFetcher:
             self.logger.error(f"Match Detail API请求失败: {match_id}, 错误: {e}")
             return None
         except json.JSONDecodeError as e:
-            self.logger.error(f"Match Detail API响应解析失败: {match_id}, 错误: {e}")
+            self.logger.error(f"Match Detail API响应解析失败: {match_id}, 错误: {e}, 响应内容: {response.text[:200]}...")
             return None
         except Exception as e:
             self.logger.error(f"Match Detail API未知错误: {match_id}, 错误: {e}")
@@ -162,7 +272,25 @@ class IncrementalMatchFetcher:
             response = requests.get(url, headers=self.headers, timeout=30)
             response.raise_for_status()
             
-            data = response.json()
+            # 首先尝试直接解析响应文本
+            content = response.text
+            
+            # 如果响应内容以非JSON字符开头，尝试解压或记录错误
+            if not content.strip().startswith(('{', '[')):
+                # 记录原始响应信息用于调试
+                self.logger.warning(f"VIP Plus API返回非JSON内容: {match_id}")
+                self.logger.warning(f"响应状态码: {response.status_code}")
+                self.logger.warning(f"响应头: {dict(response.headers)}")
+                self.logger.warning(f"响应内容长度: {len(response.content)}")
+                self.logger.warning(f"响应开头: {content[:200]}")
+                
+                # 尝试解压（作为备用方案）
+                content = self._decompress_response(response.content, match_id, "VIP Plus")
+                if content is None:
+                    return None
+            
+            # 使用解析的内容
+            data = json.loads(content)
             
             # 检查API返回状态
             if data.get('code') == 0:  # 5E API成功状态码是0
@@ -176,7 +304,7 @@ class IncrementalMatchFetcher:
             self.logger.error(f"VIP Plus API请求失败: {match_id}, 错误: {e}")
             return None
         except json.JSONDecodeError as e:
-            self.logger.error(f"VIP Plus API响应解析失败: {match_id}, 错误: {e}")
+            self.logger.error(f"VIP Plus API响应解析失败: {match_id}, 错误: {e}, 响应内容: {response.text[:200]}...")
             return None
         except Exception as e:
             self.logger.error(f"VIP Plus API未知错误: {match_id}, 错误: {e}")
@@ -205,124 +333,414 @@ class IncrementalMatchFetcher:
             
         try:
             with self.db_connection.cursor() as cursor:
-                # 插入基本比赛信息
-                match_sql = """
-                INSERT INTO matches (
-                    match_id, match_uuid, match_type, match_mode, match_status,
-                    start_time, end_time, duration, map_name, server_location,
-                    team1_name, team1_score, team2_name, team2_score,
-                    winner_team, mvp_player, created_at, updated_at
-                ) VALUES (
-                    %(match_id)s, %(match_uuid)s, %(match_type)s, %(match_mode)s, %(match_status)s,
-                    %(start_time)s, %(end_time)s, %(duration)s, %(map_name)s, %(server_location)s,
-                    %(team1_name)s, %(team1_score)s, %(team2_name)s, %(team2_score)s,
-                    %(winner_team)s, %(mvp_player)s, NOW(), NOW()
-                ) ON DUPLICATE KEY UPDATE
-                    match_status = VALUES(match_status),
-                    end_time = VALUES(end_time),
-                    duration = VALUES(duration),
-                    team1_score = VALUES(team1_score),
-                    team2_score = VALUES(team2_score),
-                    winner_team = VALUES(winner_team),
-                    mvp_player = VALUES(mvp_player),
-                    updated_at = NOW()
-                """
+                # 合并比赛列表数据和详情数据
+                merged_data = match_data.copy()
+                if detail_data:
+                    # 从详情数据中获取match_code等关键字段
+                    merged_data.update(detail_data)
+                    # 确保match_code字段存在
+                    if 'match_code' not in merged_data or not merged_data['match_code']:
+                        merged_data['match_code'] = match_data.get('match_id', '')
+                else:
+                    # 如果没有详情数据，使用match_id作为match_code
+                    merged_data['match_code'] = match_data.get('match_id', '')
                 
-                # 准备基本比赛数据
-                match_params = {
-                    'match_id': match_data.get('match_id'),
-                    'match_uuid': match_data.get('match_uuid'),
-                    'match_type': match_data.get('match_type'),
-                    'match_mode': match_data.get('match_mode'),
-                    'match_status': match_data.get('match_status'),
-                    'start_time': match_data.get('start_time'),
-                    'end_time': match_data.get('end_time'),
-                    'duration': match_data.get('duration'),
-                    'map_name': match_data.get('map_name'),
-                    'server_location': match_data.get('server_location'),
-                    'team1_name': match_data.get('team1_name'),
-                    'team1_score': match_data.get('team1_score'),
-                    'team2_name': match_data.get('team2_name'),
-                    'team2_score': match_data.get('team2_score'),
-                    'winner_team': match_data.get('winner_team'),
-                    'mvp_player': match_data.get('mvp_player')
-                }
+                # 保存比赛基本信息
+                self._save_match_info(cursor, match_data.get('match_id'), merged_data)
                 
-                cursor.execute(match_sql, match_params)
+                # 保存详情数据
+                if detail_data:
+                    # 保存玩家数据
+                    self._save_players_data(cursor, match_data.get('match_id'), detail_data)
                 
-                # 如果有详情数据，插入玩家统计
-                if detail_data and 'players' in detail_data:
-                    self._insert_player_stats(cursor, match_data.get('match_id'), detail_data['players'])
-                
-                # 如果有VIP数据，插入额外统计
+                # 保存VIP Plus数据
                 if vip_data:
-                    self._insert_vip_stats(cursor, match_data.get('match_id'), vip_data)
+                    self._save_vip_plus_stats(cursor, match_data.get('match_id'), vip_data)
+                
+                # 记录采集日志
+                self._log_collection_status(cursor, match_data.get('match_id'), 'match_detail', 'success' if detail_data else 'failed')
+                self._log_collection_status(cursor, match_data.get('match_id'), 'vip_plus', 'success' if vip_data else 'failed')
                 
                 self.logger.info(f"比赛数据插入成功: {match_data.get('match_id')}")
                 return True
                 
         except Exception as e:
             self.logger.error(f"插入比赛数据时出错: {match_data.get('match_id')}, 错误: {e}")
+            if 'cursor' in locals():
+                self._log_collection_status(cursor, match_data.get('match_id'), 'match_detail', 'failed', str(e))
             return False
     
-    def _insert_player_stats(self, cursor, match_id: str, players_data: List[Dict[str, Any]]):
-        """插入玩家统计数据"""
-        player_sql = """
-        INSERT INTO player_stats (
-            match_id, player_id, player_name, team_id, team_name,
-            kills, deaths, assists, headshots, kd_ratio,
-            adr, rating, mvp_count, score, created_at
+    def _save_match_info(self, cursor, match_id: str, match_data: Dict):
+        """保存比赛基本信息"""
+        sql = """
+        INSERT INTO matches (
+            match_id, match_code, game_mode, game_name, map_name, map_desc,
+            start_time, end_time, round_total, 
+            group1_all_score, group2_all_score, group1_fh_score, group1_sh_score,
+            group2_fh_score, group2_sh_score, group1_fh_role, group2_fh_role,
+            group1_sh_role, group2_sh_role, group1_uids, group2_uids,
+            match_winner, knife_winner, knife_winner_role,
+            group1_origin_elo, group1_change_elo, group2_origin_elo, group2_change_elo,
+            demo_url, location, location_full, server_ip, server_port,
+            season, year, match_mode, mvp_uid, most_kill_uid, most_assist_uid,
+            most_awp_uid, most_headshot_uid, most_first_kill_uid, most_1v2_uid,
+            most_jump_uid, most_end_uid, status, waiver, cs_type,
+            priority_show_type, pug10m_show_type, credit_match_status
         ) VALUES (
-            %(match_id)s, %(player_id)s, %(player_name)s, %(team_id)s, %(team_name)s,
-            %(kills)s, %(deaths)s, %(assists)s, %(headshots)s, %(kd_ratio)s,
-            %(adr)s, %(rating)s, %(mvp_count)s, %(score)s, NOW()
+            %(match_id)s, %(match_code)s, %(game_mode)s, %(game_name)s, %(map_name)s, %(map_desc)s,
+            %(start_time)s, %(end_time)s, %(round_total)s,
+            %(group1_all_score)s, %(group2_all_score)s, %(group1_fh_score)s, %(group1_sh_score)s,
+            %(group2_fh_score)s, %(group2_sh_score)s, %(group1_fh_role)s, %(group2_fh_role)s,
+            %(group1_sh_role)s, %(group2_sh_role)s, %(group1_uids)s, %(group2_uids)s,
+            %(match_winner)s, %(knife_winner)s, %(knife_winner_role)s,
+            %(group1_origin_elo)s, %(group1_change_elo)s, %(group2_origin_elo)s, %(group2_change_elo)s,
+            %(demo_url)s, %(location)s, %(location_full)s, %(server_ip)s, %(server_port)s,
+            %(season)s, %(year)s, %(match_mode)s, %(mvp_uid)s, %(most_kill_uid)s, %(most_assist_uid)s,
+            %(most_awp_uid)s, %(most_headshot_uid)s, %(most_first_kill_uid)s, %(most_1v2_uid)s,
+            %(most_jump_uid)s, %(most_end_uid)s, %(status)s, %(waiver)s, %(cs_type)s,
+            %(priority_show_type)s, %(pug10m_show_type)s, %(credit_match_status)s
+        ) ON DUPLICATE KEY UPDATE
+            match_code = VALUES(match_code),
+            end_time = VALUES(end_time),
+            updated_at = CURRENT_TIMESTAMP
+        """
+        
+        # 处理group1_uids和group2_uids
+        group1_uids = json.dumps(match_data.get('group1_uids', [])) if match_data.get('group1_uids') else None
+        group2_uids = json.dumps(match_data.get('group2_uids', [])) if match_data.get('group2_uids') else None
+        
+        params = {
+            'match_id': match_id,
+            'match_code': match_data.get('match_code') or match_id,
+            'game_mode': match_data.get('game_mode'),
+            'game_name': match_data.get('game_name'),
+            'map_name': match_data.get('map'),
+            'map_desc': match_data.get('map_desc'),
+            'start_time': match_data.get('start_time'),
+            'end_time': match_data.get('end_time'),
+            'round_total': match_data.get('round_total'),
+            'group1_all_score': match_data.get('group1_all_score'),
+            'group2_all_score': match_data.get('group2_all_score'),
+            'group1_fh_score': match_data.get('group1_fh_score'),
+            'group1_sh_score': match_data.get('group1_sh_score'),
+            'group2_fh_score': match_data.get('group2_fh_score'),
+            'group2_sh_score': match_data.get('group2_sh_score'),
+            'group1_fh_role': match_data.get('group1_fh_role'),
+            'group2_fh_role': match_data.get('group2_fh_role'),
+            'group1_sh_role': match_data.get('group1_sh_role'),
+            'group2_sh_role': match_data.get('group2_sh_role'),
+            'group1_uids': group1_uids,
+            'group2_uids': group2_uids,
+            'match_winner': match_data.get('match_winner'),
+            'knife_winner': match_data.get('knife_winner'),
+            'knife_winner_role': match_data.get('knife_winner_role'),
+            'group1_origin_elo': match_data.get('group1_origin_elo'),
+            'group1_change_elo': match_data.get('group1_change_elo'),
+            'group2_origin_elo': match_data.get('group2_origin_elo'),
+            'group2_change_elo': match_data.get('group2_change_elo'),
+            'demo_url': match_data.get('demo_url'),
+            'location': match_data.get('location'),
+            'location_full': match_data.get('location_full'),
+            'server_ip': match_data.get('server_ip'),
+            'server_port': match_data.get('server_port'),
+            'season': match_data.get('season'),
+            'year': match_data.get('year'),
+            'match_mode': match_data.get('match_mode'),
+            'mvp_uid': match_data.get('mvp_uid'),
+            'most_kill_uid': match_data.get('most_kill_uid'),
+            'most_assist_uid': match_data.get('most_assist_uid'),
+            'most_awp_uid': match_data.get('most_awp_uid'),
+            'most_headshot_uid': match_data.get('most_headshot_uid'),
+            'most_first_kill_uid': match_data.get('most_first_kill_uid'),
+            'most_1v2_uid': match_data.get('most_1v2_uid'),
+            'most_jump_uid': match_data.get('most_jump_uid'),
+            'most_end_uid': match_data.get('most_end_uid'),
+            'status': match_data.get('status', 1),
+            'waiver': match_data.get('waiver', 0),
+            'cs_type': match_data.get('cs_type', 0),
+            'priority_show_type': match_data.get('priority_show_type', 0),
+            'pug10m_show_type': match_data.get('pug10m_show_type', 0),
+            'credit_match_status': match_data.get('credit_match_status', 0)
+        }
+        
+        cursor.execute(sql, params)
+        self.logger.debug(f"比赛信息保存成功: {match_id}")
+
+    def _save_players_data(self, cursor, match_id: str, match_detail: Dict):
+        """保存玩家数据"""
+        # 处理group1和group2的玩家数据
+        for group_num in [1, 2]:
+            group_key = f'group_{group_num}'
+            group_data = match_detail.get(group_key, [])
+            
+            for player_data in group_data:
+                # 保存玩家基本信息
+                self._save_player_info(cursor, player_data)
+                
+                # 保存玩家比赛统计数据
+                self._save_player_match_stats(cursor, match_id, player_data, group_num)
+
+    def _save_player_info(self, cursor, player_data: Dict):
+        """保存玩家基本信息"""
+        user_info = player_data.get('user_info', {})
+        user_data = user_info.get('user_data', {})
+        profile = user_info.get('profile', {})
+        status = user_info.get('status', {})
+        platform_exp = user_info.get('platformExp', {})
+        steam = user_data.get('steam', {})
+        trusted = user_info.get('trusted', {})
+        certify = user_info.get('certify', {})
+        identity = user_info.get('identity', {})
+        
+        sql = """
+        INSERT INTO players (
+            uid, steam_id, username, nickname, uuid, email, area, mobile,
+            domain, avatar_url, avatar_audit_status, rgb_avatar_url, photo_url,
+            gender, birthday, country_id, region_id, city_id, language,
+            platform_level, platform_exp, credit, credit_level, credit_score,
+            credit_status, certify_status, certify_age, user_status, new_user,
+            anticheat_type, anticheat_status, user_created_at, user_updated_at
+        ) VALUES (
+            %(uid)s, %(steam_id)s, %(username)s, %(nickname)s, %(uuid)s, %(email)s, %(area)s, %(mobile)s,
+            %(domain)s, %(avatar_url)s, %(avatar_audit_status)s, %(rgb_avatar_url)s, %(photo_url)s,
+            %(gender)s, %(birthday)s, %(country_id)s, %(region_id)s, %(city_id)s, %(language)s,
+            %(platform_level)s, %(platform_exp)s, %(credit)s, %(credit_level)s, %(credit_score)s,
+            %(credit_status)s, %(certify_status)s, %(certify_age)s, %(user_status)s, %(new_user)s,
+            %(anticheat_type)s, %(anticheat_status)s, %(user_created_at)s, %(user_updated_at)s
+        ) ON DUPLICATE KEY UPDATE
+            username = VALUES(username),
+            nickname = VALUES(nickname),
+            platform_level = VALUES(platform_level),
+            platform_exp = VALUES(platform_exp),
+            credit = VALUES(credit),
+            credit_level = VALUES(credit_level),
+            updated_at = CURRENT_TIMESTAMP
+        """
+        
+        params = {
+            'uid': user_data.get('uid'),
+            'steam_id': steam.get('steamId'),
+            'username': user_data.get('username'),
+            'nickname': user_data.get('nickname'),
+            'uuid': user_data.get('uuid'),
+            'email': user_data.get('email'),
+            'area': user_data.get('area'),
+            'mobile': user_data.get('mobile'),
+            'domain': profile.get('domain'),
+            'avatar_url': profile.get('avatar'),
+            'avatar_audit_status': profile.get('avatar_audit_status'),
+            'rgb_avatar_url': profile.get('rgb_avatar'),
+            'photo_url': profile.get('photo'),
+            'gender': profile.get('gender'),
+            'birthday': profile.get('birthday'),
+            'country_id': profile.get('country_id'),
+            'region_id': profile.get('region_id'),
+            'city_id': profile.get('city_id'),
+            'language': profile.get('language'),
+            'platform_level': platform_exp.get('level'),
+            'platform_exp': platform_exp.get('exp'),
+            'credit': trusted.get('credit'),
+            'credit_level': trusted.get('credit_level'),
+            'credit_score': trusted.get('credit_score'),
+            'credit_status': trusted.get('credit_status'),
+            'certify_status': certify.get('status'),
+            'certify_age': certify.get('age'),
+            'user_status': status.get('status'),
+            'new_user': status.get('new_user'),
+            'anticheat_type': identity.get('anticheat_type'),
+            'anticheat_status': identity.get('anticheat_status'),
+            'user_created_at': user_data.get('created_at'),
+            'user_updated_at': user_data.get('updated_at')
+        }
+        
+        cursor.execute(sql, params)
+
+    def _save_player_match_stats(self, cursor, match_id: str, player_data: Dict, team_id: int):
+        """保存玩家比赛统计数据"""
+        fight = player_data.get('fight', {})
+        fight_t = player_data.get('fight_t', {})
+        fight_ct = player_data.get('fight_ct', {})
+        sts = player_data.get('sts', {})
+        level_info = player_data.get('level_info', {})
+        user_info = player_data.get('user_info', {})
+        user_data = user_info.get('user_data', {})
+        steam = user_data.get('steam', {})
+        
+        sql = """
+        INSERT INTO match_player_stats (
+            match_id, uid, steam_id, team_id, kills, deaths, assists, adr, rating, rating2,
+            kast, rws, kill_1, kill_2, kill_3, kill_4, kill_5, headshot, per_headshot,
+            awp_kill, awp_kill_ct, awp_kill_t, first_kill, first_death,
+            end_1v1, end_1v2, end_1v3, end_1v4, end_1v5,
+            flash_enemy, flash_enemy_time, flash_team, flash_team_time, flash_time,
+            throw_harm, throw_harm_enemy, planted_bomb, defused_bomb, explode_bomb,
+            jump_total, team_kill, benefit_kill, revenge_kill, assisted_kill, perfect_kill, hold_total,
+            many_assists_cnt1, many_assists_cnt2, many_assists_cnt3, many_assists_cnt4, many_assists_cnt5,
+            is_mvp, is_svp, is_most_kill, is_most_assist, is_most_awp, is_most_headshot,
+            is_most_first_kill, is_most_1v2, is_most_jump, is_most_end, is_highlight,
+            is_win, is_tie, change_elo, origin_elo, level_id, origin_level_id,
+            star_num, origin_star_num, change_rank, origin_rank, match_mode,
+            match_team_id, match_time, day, season, year
+        ) VALUES (
+            %(match_id)s, %(uid)s, %(steam_id)s, %(team_id)s, %(kills)s, %(deaths)s, %(assists)s, %(adr)s, %(rating)s, %(rating2)s,
+            %(kast)s, %(rws)s, %(kill_1)s, %(kill_2)s, %(kill_3)s, %(kill_4)s, %(kill_5)s, %(headshot)s, %(per_headshot)s,
+            %(awp_kill)s, %(awp_kill_ct)s, %(awp_kill_t)s, %(first_kill)s, %(first_death)s,
+            %(end_1v1)s, %(end_1v2)s, %(end_1v3)s, %(end_1v4)s, %(end_1v5)s,
+            %(flash_enemy)s, %(flash_enemy_time)s, %(flash_team)s, %(flash_team_time)s, %(flash_time)s,
+            %(throw_harm)s, %(throw_harm_enemy)s, %(planted_bomb)s, %(defused_bomb)s, %(explode_bomb)s,
+            %(jump_total)s, %(team_kill)s, %(benefit_kill)s, %(revenge_kill)s, %(assisted_kill)s, %(perfect_kill)s, %(hold_total)s,
+            %(many_assists_cnt1)s, %(many_assists_cnt2)s, %(many_assists_cnt3)s, %(many_assists_cnt4)s, %(many_assists_cnt5)s,
+            %(is_mvp)s, %(is_svp)s, %(is_most_kill)s, %(is_most_assist)s, %(is_most_awp)s, %(is_most_headshot)s,
+            %(is_most_first_kill)s, %(is_most_1v2)s, %(is_most_jump)s, %(is_most_end)s, %(is_highlight)s,
+            %(is_win)s, %(is_tie)s, %(change_elo)s, %(origin_elo)s, %(level_id)s, %(origin_level_id)s,
+            %(star_num)s, %(origin_star_num)s, %(change_rank)s, %(origin_rank)s, %(match_mode)s,
+            %(match_team_id)s, %(match_time)s, %(day)s, %(season)s, %(year)s
         ) ON DUPLICATE KEY UPDATE
             kills = VALUES(kills),
             deaths = VALUES(deaths),
             assists = VALUES(assists),
-            headshots = VALUES(headshots),
-            kd_ratio = VALUES(kd_ratio),
-            adr = VALUES(adr),
             rating = VALUES(rating),
-            mvp_count = VALUES(mvp_count),
-            score = VALUES(score)
+            updated_at = CURRENT_TIMESTAMP
         """
         
-        for player in players_data:
-            player_params = {
-                'match_id': match_id,
-                'player_id': player.get('player_id'),
-                'player_name': player.get('player_name'),
-                'team_id': player.get('team_id'),
-                'team_name': player.get('team_name'),
-                'kills': player.get('kills'),
-                'deaths': player.get('deaths'),
-                'assists': player.get('assists'),
-                'headshots': player.get('headshots'),
-                'kd_ratio': player.get('kd_ratio'),
-                'adr': player.get('adr'),
-                'rating': player.get('rating'),
-                'mvp_count': player.get('mvp_count'),
-                'score': player.get('score')
-            }
-            cursor.execute(player_sql, player_params)
-    
-    def _insert_vip_stats(self, cursor, match_id: str, vip_data: Dict[str, Any]):
-        """插入VIP统计数据"""
-        vip_sql = """
-        INSERT INTO vip_stats (
-            match_id, additional_data, created_at
-        ) VALUES (
-            %(match_id)s, %(additional_data)s, NOW()
-        ) ON DUPLICATE KEY UPDATE
-            additional_data = VALUES(additional_data)
-        """
-        
-        vip_params = {
+        params = {
             'match_id': match_id,
-            'additional_data': json.dumps(vip_data, ensure_ascii=False)
+            'uid': user_data.get('uid'),
+            'steam_id': steam.get('steamId'),
+            'team_id': team_id,
+            'kills': fight.get('kill', 0),
+            'deaths': fight.get('death', 0),
+            'assists': fight.get('assist', 0),
+            'adr': fight.get('adr', 0),
+            'rating': fight.get('rating', 0),
+            'rating2': fight.get('rating2', 0),
+            'kast': fight.get('kast', 0),
+            'rws': fight.get('rws', 0),
+            'kill_1': fight.get('kill_1', 0),
+            'kill_2': fight.get('kill_2', 0),
+            'kill_3': fight.get('kill_3', 0),
+            'kill_4': fight.get('kill_4', 0),
+            'kill_5': fight.get('kill_5', 0),
+            'headshot': fight.get('headshot', 0),
+            'per_headshot': fight.get('per_headshot', 0),
+            'awp_kill': fight.get('awp_kill', 0),
+            'awp_kill_ct': fight_ct.get('awp_kill', 0),
+            'awp_kill_t': fight_t.get('awp_kill', 0),
+            'first_kill': fight.get('first_kill', 0),
+            'first_death': fight.get('first_death', 0),
+            'end_1v1': fight.get('end_1v1', 0),
+            'end_1v2': fight.get('end_1v2', 0),
+            'end_1v3': fight.get('end_1v3', 0),
+            'end_1v4': fight.get('end_1v4', 0),
+            'end_1v5': fight.get('end_1v5', 0),
+            'flash_enemy': fight.get('flash_enemy', 0),
+            'flash_enemy_time': fight.get('flash_enemy_time', 0),
+            'flash_team': fight.get('flash_team', 0),
+            'flash_team_time': fight.get('flash_team_time', 0),
+            'flash_time': fight.get('flash_time', 0),
+            'throw_harm': fight.get('throw_harm', 0),
+            'throw_harm_enemy': fight.get('throw_harm_enemy', 0),
+            'planted_bomb': fight.get('planted_bomb', 0),
+            'defused_bomb': fight.get('defused_bomb', 0),
+            'explode_bomb': fight.get('explode_bomb', 0),
+            'jump_total': fight.get('jump_total', 0),
+            'team_kill': fight.get('team_kill', 0),
+            'benefit_kill': fight.get('benefit_kill', 0),
+            'revenge_kill': fight.get('revenge_kill', 0),
+            'assisted_kill': fight.get('assisted_kill', 0),
+            'perfect_kill': fight.get('perfect_kill', 0),
+            'hold_total': fight.get('hold_total', 0),
+            'many_assists_cnt1': fight.get('many_assists_cnt1', 0),
+            'many_assists_cnt2': fight.get('many_assists_cnt2', 0),
+            'many_assists_cnt3': fight.get('many_assists_cnt3', 0),
+            'many_assists_cnt4': fight.get('many_assists_cnt4', 0),
+            'many_assists_cnt5': fight.get('many_assists_cnt5', 0),
+            'is_mvp': sts.get('is_mvp', False),
+            'is_svp': sts.get('is_svp', False),
+            'is_most_kill': sts.get('is_most_kill', False),
+            'is_most_assist': sts.get('is_most_assist', False),
+            'is_most_awp': sts.get('is_most_awp', False),
+            'is_most_headshot': sts.get('is_most_headshot', False),
+            'is_most_first_kill': sts.get('is_most_first_kill', False),
+            'is_most_1v2': sts.get('is_most_1v2', False),
+            'is_most_jump': sts.get('is_most_jump', False),
+            'is_most_end': sts.get('is_most_end', False),
+            'is_highlight': sts.get('is_highlight', False),
+            'is_win': sts.get('is_win', False),
+            'is_tie': sts.get('is_tie', False),
+            'change_elo': sts.get('change_elo', 0),
+            'origin_elo': sts.get('origin_elo', 0),
+            'level_id': level_info.get('level_id', 0),
+            'origin_level_id': level_info.get('origin_level_id', 0),
+            'star_num': level_info.get('star_num', 0),
+            'origin_star_num': level_info.get('origin_star_num', 0),
+            'change_rank': sts.get('change_rank', 0),
+            'origin_rank': sts.get('origin_rank', 0),
+            'match_mode': sts.get('match_mode'),
+            'match_team_id': sts.get('match_team_id', 0),
+            'match_time': sts.get('match_time'),
+            'day': sts.get('day'),
+            'season': sts.get('season'),
+            'year': sts.get('year')
         }
-        cursor.execute(vip_sql, vip_params)
+        
+        cursor.execute(sql, params)
+
+    def _save_vip_plus_stats(self, cursor, match_id: str, vip_plus_data: Dict):
+        """保存VIP Plus数据"""
+        for steam_id, stats in vip_plus_data.items():
+            sql = """
+            INSERT INTO match_player_vip_stats (
+                match_id, steam_id, fd_ct, fd_t, kast, awp_kill, awp_kill_ct, awp_kill_t,
+                damage_stats, damage_receive
+            ) VALUES (
+                %(match_id)s, %(steam_id)s, %(fd_ct)s, %(fd_t)s, %(kast)s, %(awp_kill)s, %(awp_kill_ct)s, %(awp_kill_t)s,
+                %(damage_stats)s, %(damage_receive)s
+            ) ON DUPLICATE KEY UPDATE
+                fd_ct = VALUES(fd_ct),
+                fd_t = VALUES(fd_t),
+                kast = VALUES(kast),
+                awp_kill = VALUES(awp_kill),
+                awp_kill_ct = VALUES(awp_kill_ct),
+                awp_kill_t = VALUES(awp_kill_t),
+                damage_stats = VALUES(damage_stats),
+                damage_receive = VALUES(damage_receive),
+                updated_at = CURRENT_TIMESTAMP
+            """
+            
+            params = {
+                'match_id': match_id,
+                'steam_id': steam_id,
+                'fd_ct': stats.get('fd_ct', 0),
+                'fd_t': stats.get('fd_t', 0),
+                'kast': stats.get('kast', 0),
+                'awp_kill': stats.get('awp_kill', 0),
+                'awp_kill_ct': stats.get('awp_kill_ct', 0),
+                'awp_kill_t': stats.get('awp_kill_t', 0),
+                'damage_stats': json.dumps(stats.get('damage_stats', {}), ensure_ascii=False),
+                'damage_receive': json.dumps(stats.get('damage_receive', {}), ensure_ascii=False)
+            }
+            
+            cursor.execute(sql, params)
+
+    def _log_collection_status(self, cursor, match_id: str, data_type: str, status: str, error_msg: str = None):
+        """记录采集状态"""
+        sql = """
+        INSERT INTO data_collection_logs (
+            match_id, data_type, status, error_message, created_at
+        ) VALUES (
+            %(match_id)s, %(data_type)s, %(status)s, %(error_message)s, NOW()
+        )
+        """
+        
+        params = {
+            'match_id': match_id,
+            'data_type': data_type,
+            'status': status,
+            'error_message': error_msg
+        }
+        
+        cursor.execute(sql, params)
     
     def _load_state(self) -> Dict[str, Any]:
         """加载抓取状态"""
