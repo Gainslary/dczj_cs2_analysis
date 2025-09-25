@@ -91,19 +91,25 @@ class MatchDataScheduler:
         self.logger.info("🕐 启动定时任务调度器")
         
         # 设置定时任务
-        # 每天早上8点执行
-        schedule.every().day.at("08:00").do(self.run_fetch_job)
+        schedule.every().day.at("06:00").do(self.run_fetch_job)
+
+        schedule.every().day.at("22:00").do(self.run_fetch_job)
+    
+        schedule.every().day.at("22:30").do(self.run_fetch_job)
         
-        # 每天下午2点执行
-        schedule.every().day.at("14:00").do(self.run_fetch_job)
-        
-        # 每天晚上8点执行
-        schedule.every().day.at("20:00").do(self.run_fetch_job)
+        schedule.every().day.at("23:00").do(self.run_fetch_job)
+
+        schedule.every().day.at("23:30").do(self.run_fetch_job)
+
+        schedule.every().day.at("00:00").do(self.run_fetch_job)
         
         self.logger.info("📅 已设置定时任务:")
-        self.logger.info("   - 每天 08:00 执行增量抓取")
-        self.logger.info("   - 每天 14:00 执行增量抓取")
-        self.logger.info("   - 每天 20:00 执行增量抓取")
+        self.logger.info("   - 每天 06:00 执行增量抓取")
+        self.logger.info("   - 每天 22:00 执行增量抓取")
+        self.logger.info("   - 每天 22:30 执行增量抓取")
+        self.logger.info("   - 每天 23:00 执行增量抓取")
+        self.logger.info("   - 每天 23:30 执行增量抓取")
+        self.logger.info("   - 每天 00:00 执行增量抓取")
         
         # 立即执行一次
         self.logger.info("🏃 立即执行一次抓取任务")
