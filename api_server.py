@@ -1017,11 +1017,12 @@ def get_leaderboard():
         if map_filter:
             base_query += " AND m.map_name = %s"
             params.append(map_filter)
-        
+
         # 分组和排序 - 使用原始统计表达式而不是别名，以避免NULL值排序问题
+        # MySQL不支持NULLS LAST，使用COALESCE来处理NULL值
         base_query += f"""
         GROUP BY p.uid, p.username, p.nickname, p.platform_level, p.steam_id
-        ORDER BY {valid_stats[stat_type]} DESC NULLS LAST
+        ORDER BY COALESCE({valid_stats[stat_type]}, 0) DESC
         """
 
         # 执行查询
