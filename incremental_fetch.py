@@ -382,6 +382,26 @@ class IncrementalMatchFetcher:
         except Exception as e:
             self.logger.error(f"检查比赛是否存在时出错: {match_id}, 错误: {e}")
             return False
+
+    def _get_all_player_uuids(self) -> List[str]:
+        """查询 players 表获取所有用户的 uuid 列表"""
+        try:
+            # 确保数据库连接（增量抓取需要用到）
+            if not self.db_connection:
+                if not self.connect_database():
+                    self.logger.error("数据库连接失败，无法查询玩家uuid")
+                    return []
+
+            with self.db_connection.cursor() as cursor:
+                sql = "SELECT DISTINCT uuid FROM players WHERE uuid IS NOT NULL AND uuid <> ''"
+                cursor.execute(sql)
+                rows = cursor.fetchall()
+                uuids = [row.get('uuid') for row in rows if row.get('uuid')]
+                self.logger.info(f"从 players 表获取到 {len(uuids)} 个uuid")
+                return uuids
+        except Exception as e:
+            self.logger.error(f"查询玩家uuid失败: {e}")
+            return []
     
     def insert_match_data(self, match_data: Dict[str, Any], detail_data: Optional[Dict[str, Any]] = None,
                          vip_data: Optional[Dict[str, Any]] = None) -> bool:
@@ -412,16 +432,16 @@ class IncrementalMatchFetcher:
                     self._save_vip_plus_stats(cursor, match_data.get('match_id'), vip_data)
 
                 # 记录采集日志
-                self._log_collection_status(cursor, match_data.get('match_id'), 'match_detail', 'success' if detail_data else 'failed')
-                self._log_collection_status(cursor, match_data.get('match_id'), 'vip_plus', 'success' if vip_data else 'failed')
+                # self._log_collection_status(cursor, match_data.get('match_id'), 'match_detail', 'success' if detail_data else 'failed')
+                # self._log_collection_status(cursor, match_data.get('match_id'), 'vip_plus', 'success' if vip_data else 'failed')
 
                 self.logger.info(f"比赛数据插入成功: {match_data.get('match_id')}")
                 return True
 
         except Exception as e:
             self.logger.error(f"插入比赛数据时出错: {match_data.get('match_id')}, 错误: {e}")
-            if 'cursor' in locals():
-                self._log_collection_status(cursor, match_data.get('match_id'), 'match_detail', 'failed', str(e))
+            # if 'cursor' in locals():
+            #     self._log_collection_status(cursor, match_data.get('match_id'), 'match_detail', 'failed', str(e))
             return False
     
     def _save_match_info(self, cursor, match_id: str, match_data: Dict):
@@ -955,8 +975,8 @@ class IncrementalMatchFetcher:
             self.logger.error(f"JSON解析失败: {e}")
             raise
     
-    def _build_api_url(self, page: int, start_time: int, end_time: int) -> str:
-        """构建API URL"""
+    def _build_api_url(self, page: int, start_time: int, end_time: int, uuid: str) -> str:
+        """构建API URL（支持指定用户uuid）"""
         base_url = "https://gate.5eplay.com/crane/http/api/data/match/list"
         params = {
             'match_type': -1,
@@ -964,7 +984,7 @@ class IncrementalMatchFetcher:
             'date': 0,
             'start_time': start_time,
             'end_time': end_time,
-            'uuid': '4ecb6b0d-a7ca-11ea-8109-ec0d9a7185b0',
+            'uuid': uuid,
             'limit': 30,
             'cs_type': 0
         }
@@ -1009,43 +1029,62 @@ class IncrementalMatchFetcher:
         return new_matches
     
     def _fetch_incremental_data(self) -> List[Dict[str, Any]]:
-        """获取增量数据"""
+        """获取增量数据：遍历 players 表所有 uuid，聚合并去重"""
         start_time, end_time = self._get_fetch_time_range()
-        new_matches = []
-        page = 1
-        max_pages = 50  # 增量抓取不需要太多页
-        
-        self.logger.info("开始增量数据抓取...")
-        
-        while page <= max_pages:
-            try:
-                api_url = self._build_api_url(page, start_time, end_time)
-                data = self._fetch_match_data(api_url)
-                
-                if 'data' not in data or not data['data']:
-                    self.logger.info(f"第 {page} 页没有数据，停止获取")
+        new_matches: List[Dict[str, Any]] = []
+        max_pages = 50  # 每个uuid最多翻页数量
+
+        # 运行期内去重集合（包含历史已知ID，避免同轮重复）
+        seen_ids: Set[str] = set(self.state.get("known_match_ids", []))
+
+        # 查询所有玩家uuid
+        uuids = self._get_all_player_uuids()
+        if not uuids:
+            self.logger.warning("未获取到任何玩家uuid，增量抓取终止")
+            return []
+
+        self.logger.info("开始多用户增量数据抓取...")
+
+        for idx, uuid in enumerate(uuids, 1):
+            page = 1
+            self.logger.info(f"[{idx}/{len(uuids)}] 处理用户uuid: {uuid}")
+            while page <= max_pages:
+                try:
+                    api_url = self._build_api_url(page, start_time, end_time, uuid)
+                    data = self._fetch_match_data(api_url)
+
+                    if 'data' not in data or not data['data']:
+                        self.logger.info(f"uuid={uuid} 第 {page} 页没有数据，停止该用户获取")
+                        break
+
+                    # 筛选新的比赛数据
+                    page_new_matches = self._filter_new_matches(data['data'])
+
+                    # 本页去重并累加
+                    added_count = 0
+                    for m in page_new_matches:
+                        mid = m.get('match_id')
+                        if mid and mid not in seen_ids:
+                            new_matches.append(m)
+                            seen_ids.add(mid)
+                            added_count += 1
+
+                    if added_count > 0:
+                        self.logger.info(f"uuid={uuid} 第 {page} 页新增 {added_count} 条记录")
+
+                    # 如果返回的数据少于30条，说明已经是最后一页
+                    if len(data['data']) < 30:
+                        self.logger.info(f"uuid={uuid} 第 {page} 页数据不足30条，已到最后一页")
+                        break
+
+                    page += 1
+                    time.sleep(0.5)  # 避免请求过于频繁
+
+                except Exception as e:
+                    self.logger.error(f"uuid={uuid} 获取第 {page} 页数据时出错: {e}")
                     break
-                
-                # 筛选新的比赛数据
-                page_new_matches = self._filter_new_matches(data['data'])
-                
-                if page_new_matches:
-                    new_matches.extend(page_new_matches)
-                    self.logger.info(f"第 {page} 页找到 {len(page_new_matches)} 条新记录")
-                
-                # 如果返回的数据少于30条，说明已经是最后一页
-                if len(data['data']) < 30:
-                    self.logger.info(f"第 {page} 页数据不足30条，已到最后一页")
-                    break
-                
-                page += 1
-                time.sleep(0.5)  # 避免请求过于频繁
-                
-            except Exception as e:
-                self.logger.error(f"获取第 {page} 页数据时出错: {e}")
-                break
-        
-        self.logger.info(f"增量抓取完成，共获取 {len(new_matches)} 条新记录")
+
+        self.logger.info(f"增量抓取完成，共获取 {len(new_matches)} 条新记录（多用户）")
         return new_matches
     
     def _load_existing_matches(self) -> List[Dict[str, Any]]:
