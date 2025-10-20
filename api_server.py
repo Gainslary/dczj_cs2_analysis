@@ -259,7 +259,7 @@ def search_players():
         import urllib.parse
         
         nickname = request.args.get('nickname', '').strip()
-        limit = min(int(request.args.get('limit', 20)), 50)  # 最多返回50个结果
+        limit = min(int(request.args.get('limit', 20)), 50)  # 最多返回50个结果（仅用于有搜索词时）
         
         # 确保正确解码URL编码的中文字符
         try:
@@ -271,42 +271,58 @@ def search_players():
         except:
             pass  # 如果解码失败，使用原始字符串
         
+        # 当未提供昵称时，返回全部玩家列表（不限制数量）
         if not nickname:
-            return jsonify({'error': '请提供昵称参数'}), 400
-        
-        # 模糊查询玩家 - 直接从players表搜索，同时搜索原始字符和Unicode转义形式
-        search_query = """
-        SELECT 
-            steam_id,
-            username,
-            nickname,
-            platform_level,
-            avatar_url
-        FROM players
-        WHERE (username LIKE %s OR username LIKE %s)
-        AND username IS NOT NULL
-        LIMIT %s
-        """
-        
-        # 准备两种搜索模式
-        search_pattern = f"%{nickname}%"
-        
-        # 将中文字符转换为Unicode转义序列（使用正确的格式）
-        unicode_escaped = ""
-        for char in nickname:
-            if ord(char) > 127:
-                unicode_escaped += f"\\u{ord(char):04x}"
-            else:
-                unicode_escaped += char
-        unicode_pattern = f"%{unicode_escaped}%"
-        
-        # 直接使用MySQL连接执行查询
-        connection = get_database_connection()
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(search_query, (search_pattern, unicode_pattern, limit))
-        players = cursor.fetchall()
-        cursor.close()
-        connection.close()
+            # 直接查询所有玩家（仅返回必要字段）
+            all_players_query = """
+            SELECT 
+                uid,
+                steam_id,
+                username,
+                platform_level
+            FROM players
+            WHERE username IS NOT NULL
+            ORDER BY platform_level DESC, username
+            """
+            connection = get_database_connection()
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(all_players_query)
+            players = cursor.fetchall()
+            cursor.close()
+            connection.close()
+        else:
+            # 模糊查询玩家 - 直接从players表搜索，同时搜索原始字符和Unicode转义形式
+            search_query = """
+            SELECT 
+                uid,
+                steam_id,
+                username,
+                platform_level
+            FROM players
+            WHERE (username LIKE %s OR username LIKE %s)
+            AND username IS NOT NULL
+            LIMIT %s
+            """
+            
+            # 准备两种搜索模式
+            search_pattern = f"%{nickname}%"
+            
+            # 将中文字符转换为Unicode转义序列（使用正确的格式）
+            unicode_escaped = ""
+            for char in nickname:
+                if ord(char) > 127:
+                    unicode_escaped += f"\\u{ord(char):04x}"
+                else:
+                    unicode_escaped += char
+            unicode_pattern = f"%{unicode_escaped}%"
+            
+            # 直接使用MySQL连接执行查询
+            connection = get_database_connection()
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(search_query, (search_pattern, unicode_pattern, limit))
+            players = cursor.fetchall()
+            cursor.close()
+            connection.close()
 
         if not players:
             return jsonify({
@@ -335,11 +351,10 @@ def search_players():
             total_matches = match_count_result['total_matches'] if match_count_result else 0
             
             formatted_players.append({
+                'uid': player['uid'],
                 'steam_id': player['steam_id'],
                 'username': player['username'],
-                'nickname': player['nickname'] or player['username'],
-                'platform_level': player['platform_level'] or 0,
-                'avatar_url': player['avatar_url'],
+                'platform_level': player.get('platform_level') or 0,
                 'total_matches': total_matches
             })
         
@@ -1177,6 +1192,817 @@ def not_found(error):
 @app.errorhandler(500)
 def internal_error(error):
     return jsonify({'error': '服务器内部错误'}), 500
+
+# ========================================
+# 自定义比赛模块API接口
+# ========================================
+
+def execute_insert_query(query, params=None):
+    """执行插入查询并返回插入的ID"""
+    connection = get_database_connection()
+    if not connection:
+        return None
+    
+    try:
+        cursor = connection.cursor()
+        cursor.execute(query, params or ())
+        connection.commit()
+        return cursor.lastrowid
+    except Error as e:
+        logger.error(f"插入查询执行错误: {e}")
+        connection.rollback()
+        return None
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+def execute_update_query(query, params=None):
+    """执行更新查询"""
+    connection = get_database_connection()
+    if not connection:
+        return False
+    
+    try:
+        cursor = connection.cursor()
+        cursor.execute(query, params or ())
+        connection.commit()
+        return True
+    except Error as e:
+        logger.error(f"更新查询执行错误: {e}")
+        connection.rollback()
+        return False
+    finally:
+        if connection.is_connected():
+            cursor.close()
+            connection.close()
+
+@app.route('/api/custom-tournaments', methods=['GET'])
+def get_custom_tournaments():
+    """获取自定义比赛列表"""
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        status = request.args.get('status', '')
+        search = request.args.get('search', '')
+        
+        # 构建查询
+        base_query = """
+        SELECT * FROM custom_tournament_complete_view
+        WHERE 1=1
+        """
+        params = []
+        
+        if status:
+            base_query += " AND status = %s"
+            params.append(status)
+        
+        if search:
+            base_query += " AND name LIKE %s"
+            params.append(f"%{search}%")
+        
+        # 添加排序和分页
+        base_query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        params.extend([limit, (page - 1) * limit])
+        
+        tournaments = execute_query(base_query, params)
+        
+        # 获取总数
+        count_query = """
+        SELECT COUNT(*) as total FROM custom_tournaments
+        WHERE 1=1
+        """
+        count_params = []
+        
+        if status:
+            count_query += " AND status = %s"
+            count_params.append(status)
+        
+        if search:
+            count_query += " AND name LIKE %s"
+            count_params.append(f"%{search}%")
+        
+        total_result = execute_query(count_query, count_params)
+        total = total_result[0]['total'] if total_result else 0
+        
+        return jsonify({
+            'success': True,
+            'data': tournaments or [],
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'pages': (total + limit - 1) // limit
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"获取自定义比赛列表错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments', methods=['POST'])
+def create_custom_tournament():
+    """创建自定义比赛"""
+    try:
+        data = request.get_json()
+        
+        # 验证必需字段（teams 改为可选，允许在关联比赛时自动生成队伍）
+        required_fields = ['name', 'start_time', 'end_time', 'creator_uid']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'success': False, 'error': f'缺少必需字段: {field}'}), 400
+        
+        # 校验创建者是否存在于 players 表
+        try:
+            creator_check = execute_query("SELECT uid FROM players WHERE uid = %s", [data['creator_uid']])
+            if not creator_check:
+                return jsonify({'success': False, 'error': '创建者不存在，请选择有效玩家UID'}), 400
+        except Exception as e:
+            logger.error(f"校验创建者失败: {e}")
+            return jsonify({'success': False, 'error': '创建者校验失败'}), 500
+
+        # 插入自定义比赛
+        tournament_query = """
+        INSERT INTO custom_tournaments (name, description, start_time, end_time, creator_uid)
+        VALUES (%s, %s, %s, %s, %s)
+        """
+        tournament_params = [
+            data['name'],
+            data.get('description', ''),
+            data['start_time'],
+            data['end_time'],
+            data['creator_uid']
+        ]
+        
+        tournament_id = execute_insert_query(tournament_query, tournament_params)
+        
+        if not tournament_id:
+            return jsonify({'success': False, 'error': '创建比赛失败'}), 500
+        
+        # 插入队伍信息（如果提供了teams）
+        teams_data = data.get('teams')
+        if isinstance(teams_data, list) and len(teams_data) > 0:
+            for team in teams_data:
+                team_query = """
+                INSERT INTO custom_tournament_teams (tournament_id, team_name, player_uids, captain_uid)
+                VALUES (%s, %s, %s, %s)
+                """
+                team_params = [
+                    tournament_id,
+                    team.get('team_name', ''),
+                    json.dumps(team.get('player_uids', [])),
+                    team.get('captain_uid')
+                ]
+                
+                team_id = execute_insert_query(team_query, team_params)
+                if not team_id:
+                    logger.warning(f"创建队伍失败: {team.get('team_name', '')}")
+        
+        return jsonify({
+            'success': True,
+            'data': {'tournament_id': tournament_id},
+            'message': '自定义比赛创建成功'
+        })
+        
+    except Exception as e:
+        logger.error(f"创建自定义比赛错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments/<int:tournament_id>', methods=['GET'])
+def get_custom_tournament_detail(tournament_id):
+    """获取自定义比赛详情"""
+    try:
+        # 获取比赛基本信息
+        tournament_query = """
+        SELECT * FROM custom_tournament_complete_view WHERE id = %s
+        """
+        tournament = execute_query(tournament_query, [tournament_id])
+        
+        if not tournament:
+            return jsonify({'success': False, 'error': '比赛不存在'}), 404
+        
+        # 获取队伍信息
+        teams_query = """
+        SELECT * FROM custom_tournament_team_details WHERE tournament_id = %s
+        """
+        teams = execute_query(teams_query, [tournament_id])
+        
+        # 获取关联的比赛
+        matches_query = """
+        SELECT 
+            ctm.*,
+            m.map_name,
+            m.start_time as match_start_time,
+            m.group1_all_score,
+            m.group2_all_score,
+            m.match_winner as original_winner,
+            t1.team_name as team1_name,
+            t2.team_name as team2_name
+        FROM custom_tournament_matches ctm
+        LEFT JOIN matches m ON ctm.match_id = m.match_id
+        LEFT JOIN custom_tournament_teams t1 ON ctm.team1_id = t1.id
+        LEFT JOIN custom_tournament_teams t2 ON ctm.team2_id = t2.id
+        WHERE ctm.tournament_id = %s
+        ORDER BY ctm.match_order, ctm.created_at
+        """
+        matches = execute_query(matches_query, [tournament_id])
+        
+        # 解析队伍的player_uids JSON字段
+        for team in teams or []:
+            if team['player_uids']:
+                try:
+                    team['player_uids'] = json.loads(team['player_uids'])
+                except:
+                    team['player_uids'] = []
+        
+        tournament_data = tournament[0]
+        tournament_data['teams'] = teams or []
+        tournament_data['matches'] = matches or []
+        
+        return jsonify({
+            'success': True,
+            'data': tournament_data
+        })
+        
+    except Exception as e:
+        logger.error(f"获取自定义比赛详情错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments/<int:tournament_id>', methods=['PUT'])
+def update_custom_tournament(tournament_id):
+    """更新自定义比赛"""
+    try:
+        data = request.get_json()
+        
+        # 更新比赛基本信息
+        update_query = """
+        UPDATE custom_tournaments 
+        SET name = %s, description = %s, start_time = %s, end_time = %s, status = %s
+        WHERE id = %s
+        """
+        update_params = [
+            data.get('name'),
+            data.get('description', ''),
+            data.get('start_time'),
+            data.get('end_time'),
+            data.get('status', 'draft'),
+            tournament_id
+        ]
+        
+        success = execute_update_query(update_query, update_params)
+        
+        if not success:
+            return jsonify({'success': False, 'error': '更新比赛失败'}), 500
+        
+        return jsonify({
+            'success': True,
+            'message': '比赛更新成功'
+        })
+        
+    except Exception as e:
+        logger.error(f"更新自定义比赛错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments/<int:tournament_id>/teams/<int:team_id>', methods=['PUT'])
+def update_custom_tournament_team(tournament_id, team_id):
+    """更新自定义比赛中的队伍信息（队名、队员UID、队长UID）"""
+    try:
+        data = request.get_json() or {}
+
+        # 校验队伍存在且属于该比赛
+        team_check_query = "SELECT id, tournament_id FROM custom_tournament_teams WHERE id = %s"
+        team_record = execute_query(team_check_query, [team_id])
+        if not team_record:
+            return jsonify({'success': False, 'error': '队伍不存在'}), 404
+        if team_record[0]['tournament_id'] != tournament_id:
+            return jsonify({'success': False, 'error': '队伍不属于该比赛'}), 400
+
+        # 组装更新字段
+        set_clauses = []
+        params = []
+
+        if 'team_name' in data:
+            team_name = (data.get('team_name') or '').strip()
+            if not team_name:
+                return jsonify({'success': False, 'error': '队伍名称不能为空'}), 400
+            set_clauses.append('team_name = %s')
+            params.append(team_name)
+
+        if 'player_uids' in data:
+            player_uids = data.get('player_uids')
+            if not isinstance(player_uids, list):
+                return jsonify({'success': False, 'error': 'player_uids 必须为数组'}), 400
+            try:
+                player_uids_json = json.dumps(player_uids)
+            except Exception:
+                return jsonify({'success': False, 'error': 'player_uids 序列化失败'}), 400
+            set_clauses.append('player_uids = %s')
+            params.append(player_uids_json)
+
+        if 'captain_uid' in data:
+            captain_uid = data.get('captain_uid')
+            # captain_uid 可以为 None
+            set_clauses.append('captain_uid = %s')
+            params.append(captain_uid)
+
+        if not set_clauses:
+            return jsonify({'success': False, 'error': '未提供可更新的字段'}), 400
+
+        update_query = f"UPDATE custom_tournament_teams SET {', '.join(set_clauses)} WHERE id = %s"
+        params.append(team_id)
+
+        success = execute_update_query(update_query, params)
+        if not success:
+            return jsonify({'success': False, 'error': '更新队伍失败'}), 500
+
+        return jsonify({'success': True, 'message': '队伍更新成功'})
+
+    except Exception as e:
+        logger.error(f"更新队伍错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments/<int:tournament_id>/teams/<int:team_id>', methods=['DELETE'])
+def delete_custom_tournament_team(tournament_id, team_id):
+    """删除自定义比赛中的队伍"""
+    try:
+        # 校验队伍存在且属于该比赛
+        team_check_query = "SELECT id, tournament_id FROM custom_tournament_teams WHERE id = %s"
+        team_record = execute_query(team_check_query, [team_id])
+        if not team_record:
+            return jsonify({'success': False, 'error': '队伍不存在'}), 404
+        if team_record[0]['tournament_id'] != tournament_id:
+            return jsonify({'success': False, 'error': '队伍不属于该比赛'}), 400
+
+        # 删除队伍。外键约束会将相关比赛中的team1_id/team2_id/winner_team_id置为NULL
+        delete_query = "DELETE FROM custom_tournament_teams WHERE id = %s AND tournament_id = %s"
+        success = execute_update_query(delete_query, [team_id, tournament_id])
+        if not success:
+            return jsonify({'success': False, 'error': '删除队伍失败'}), 500
+
+        return jsonify({'success': True, 'message': '队伍删除成功'})
+    except Exception as e:
+        logger.error(f"删除队伍错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments/<int:tournament_id>', methods=['DELETE'])
+def delete_custom_tournament(tournament_id):
+    """删除自定义比赛"""
+    try:
+        delete_query = "DELETE FROM custom_tournaments WHERE id = %s"
+        success = execute_update_query(delete_query, [tournament_id])
+        
+        if not success:
+            return jsonify({'success': False, 'error': '删除比赛失败'}), 500
+        
+        return jsonify({
+            'success': True,
+            'message': '比赛删除成功'
+        })
+        
+    except Exception as e:
+        logger.error(f"删除自定义比赛错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# =====================
+# 自定义比赛统计接口
+# =====================
+@app.route('/api/custom-tournaments/<int:tournament_id>/stats/teams', methods=['GET'])
+def get_custom_tournament_team_stats(tournament_id):
+    """获取自定义比赛中队伍的统计（胜率、总击杀、总死亡、总助攻）"""
+    try:
+        # 统计每个队伍的参赛场次与胜场
+        team_match_stats_query = """
+        SELECT 
+            ctt.id AS team_id,
+            ctt.team_name,
+            COUNT(ctm.id) AS matches_played,
+            SUM(CASE WHEN ctm.winner_team_id = ctt.id THEN 1 ELSE 0 END) AS wins
+        FROM custom_tournament_teams ctt
+        LEFT JOIN custom_tournament_matches ctm
+          ON ctm.tournament_id = ctt.tournament_id 
+         AND (ctm.team1_id = ctt.id OR ctm.team2_id = ctt.id)
+        WHERE ctt.tournament_id = %s
+        GROUP BY ctt.id, ctt.team_name
+        """
+        team_match_stats = execute_query(team_match_stats_query, [tournament_id]) or []
+
+        # 聚合每个队伍在本比赛范围内的总击杀/死亡/助攻
+        team_kda_query = """
+        SELECT tm.team_id AS team_id,
+               COALESCE(SUM(mps.kills), 0) AS total_kills,
+               COALESCE(SUM(mps.deaths), 0) AS total_deaths,
+               COALESCE(SUM(mps.assists), 0) AS total_assists
+        FROM match_player_stats mps
+        JOIN (
+            SELECT ctm.match_id AS match_id, 1 AS team_side, ctm.team1_id AS team_id
+            FROM custom_tournament_matches ctm
+            WHERE ctm.tournament_id = %s AND ctm.team1_id IS NOT NULL
+            UNION ALL
+            SELECT ctm.match_id AS match_id, 2 AS team_side, ctm.team2_id AS team_id
+            FROM custom_tournament_matches ctm
+            WHERE ctm.tournament_id = %s AND ctm.team2_id IS NOT NULL
+        ) tm ON tm.match_id = mps.match_id AND tm.team_side = mps.team_id
+        GROUP BY tm.team_id
+        """
+        team_kda_stats = execute_query(team_kda_query, [tournament_id, tournament_id]) or []
+
+        kda_map = {row['team_id']: row for row in team_kda_stats}
+        result = []
+        for row in team_match_stats:
+            team_id = row['team_id']
+            matches_played = row['matches_played'] or 0
+            wins = row['wins'] or 0
+            losses = max(matches_played - wins, 0)
+            kda = kda_map.get(team_id, {'total_kills': 0, 'total_deaths': 0, 'total_assists': 0})
+            win_rate = (wins / matches_played * 100) if matches_played > 0 else 0
+            result.append({
+                'team_id': team_id,
+                'team_name': row['team_name'],
+                'matches_played': matches_played,
+                'wins': wins,
+                'losses': losses,
+                'win_rate': round(win_rate, 2),
+                'total_kills': int(kda.get('total_kills', 0) or 0),
+                'total_deaths': int(kda.get('total_deaths', 0) or 0),
+                'total_assists': int(kda.get('total_assists', 0) or 0)
+            })
+
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        logger.error(f"获取自定义比赛队伍统计错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments/<int:tournament_id>/leaderboard', methods=['GET'])
+def get_custom_tournament_leaderboard(tournament_id):
+    """获取限定于自定义比赛范围的玩家排行榜"""
+    try:
+        # 支持两种参数名：stat 或 stat_type
+        stat_type = request.args.get('stat') or request.args.get('stat_type') or 'rating2'
+        map_filter = request.args.get('map', '')
+
+        valid_stats = {
+            'rating2': 'AVG(mps.rating2)',
+            'rating': 'AVG(mps.rating)',
+            'adr': 'AVG(mps.adr)',
+            'kd_ratio': 'SUM(mps.kills) / NULLIF(SUM(mps.deaths), 0)',
+            'avg_kills': 'AVG(mps.kills)',
+            'avg_assists': 'AVG(mps.assists)',
+            'avg_deaths': 'AVG(mps.deaths)',
+            'headshot_rate': 'AVG(mps.per_headshot)',
+            'avg_first_kill': 'AVG(mps.first_kill)',
+            'avg_first_death': 'AVG(mps.first_death)',
+            'first_kill_rate': 'SUM(mps.first_kill) / NULLIF(SUM(m.round_total), 0)',
+            'first_death_rate': 'SUM(mps.first_death) / NULLIF(SUM(m.round_total), 0)',
+            'avg_awp_kills': 'AVG(mps.awp_kill)',
+            'mvp_count': 'SUM(CASE WHEN m.mvp_uid = mps.uid THEN 1 ELSE 0 END)',
+            'win_rate': 'SUM(CASE WHEN m.match_winner = mps.team_id AND m.match_winner != 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(DISTINCT mps.match_id), 0)',
+            'kast': 'AVG(mps.kast)',
+            'rws': 'AVG(mps.rws)'
+        }
+
+        if stat_type not in valid_stats:
+            return jsonify({'success': False, 'error': '无效的排行榜类型'}), 400
+
+        base_query = f"""
+        SELECT
+            p.username,
+            p.nickname,
+            p.platform_level,
+            p.steam_id,
+            COUNT(DISTINCT mps.match_id) as total_matches,
+            {valid_stats[stat_type]} as stat_value,
+            AVG(mps.rating2) as avg_rating2,
+            AVG(mps.rating) as avg_rating,
+            AVG(mps.adr) as avg_adr,
+            SUM(mps.kills) / NULLIF(SUM(mps.deaths), 0) as kd_ratio,
+            AVG(mps.kills) as avg_kills,
+            AVG(mps.deaths) as avg_deaths,
+            AVG(mps.assists) as avg_assists,
+            AVG(mps.per_headshot) as avg_headshot_rate,
+            AVG(mps.first_kill) as avg_first_kill,
+            AVG(mps.first_death) as avg_first_death,
+            SUM(mps.first_kill) / NULLIF(SUM(m.round_total), 0) as first_kill_rate,
+            SUM(mps.first_death) / NULLIF(SUM(m.round_total), 0) as first_death_rate,
+            AVG(mps.awp_kill) as avg_awp_kills,
+            SUM(CASE WHEN m.mvp_uid = mps.uid THEN 1 ELSE 0 END) as mvp_count,
+            SUM(CASE WHEN m.match_winner = mps.team_id AND m.match_winner != 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(DISTINCT mps.match_id), 0) as win_rate,
+            AVG(mps.kast) as avg_kast,
+            AVG(mps.rws) as avg_rws,
+            MAX(m.start_time) as last_match_time
+        FROM match_player_stats mps
+        JOIN players p ON mps.uid = p.uid
+        JOIN matches m ON mps.match_id = m.match_id
+        JOIN custom_tournament_matches ctm ON ctm.match_id = mps.match_id AND ctm.tournament_id = %s
+        WHERE 1=1
+        """
+
+        params = [tournament_id]
+        if map_filter:
+            base_query += " AND m.map_name = %s"
+            params.append(map_filter)
+
+        base_query += f"""
+        GROUP BY p.uid, p.username, p.nickname, p.platform_level, p.steam_id
+        ORDER BY COALESCE({valid_stats[stat_type]}, 0) DESC
+        """
+
+        result = execute_query(base_query, params)
+        if result is None:
+            return jsonify({'success': False, 'error': '数据库查询失败'}), 500
+
+        leaderboard_data = []
+        for i, row in enumerate(result):
+            player_data = {
+                'rank': i + 1,
+                'username': row.get('username'),
+                'nickname': row.get('nickname'),
+                'platform_level': row.get('platform_level'),
+                'steam_id': row.get('steam_id'),
+                'total_matches': row.get('total_matches'),
+                'stat_value': round(float(row['stat_value']) if row['stat_value'] is not None else 0, 3),
+                'stats': {
+                    'avg_rating2': round(float(row['avg_rating2']) if row['avg_rating2'] is not None else 0, 3),
+                    'avg_rating': round(float(row['avg_rating']) if row['avg_rating'] is not None else 0, 3),
+                    'avg_adr': round(float(row['avg_adr']) if row['avg_adr'] is not None else 0, 2),
+                    'kd_ratio': round(float(row['kd_ratio']) if row['kd_ratio'] is not None else 0, 2),
+                    'avg_kills': round(float(row['avg_kills']) if row['avg_kills'] is not None else 0, 2),
+                    'avg_deaths': round(float(row['avg_deaths']) if row['avg_deaths'] is not None else 0, 2),
+                    'avg_assists': round(float(row['avg_assists']) if row['avg_assists'] is not None else 0, 2),
+                    'avg_headshot_rate': round(float(row['avg_headshot_rate']) if row['avg_headshot_rate'] is not None else 0, 3),
+                    'avg_first_kill': round(float(row['avg_first_kill']) if row['avg_first_kill'] is not None else 0, 2),
+                    'avg_first_death': round(float(row['avg_first_death']) if row['avg_first_death'] is not None else 0, 2),
+                    'first_kill_rate': round(float(row['first_kill_rate']) if row['first_kill_rate'] is not None else 0, 3),
+                    'first_death_rate': round(float(row['first_death_rate']) if row['first_death_rate'] is not None else 0, 3),
+                    'avg_awp_kills': round(float(row['avg_awp_kills']) if row['avg_awp_kills'] is not None else 0, 2),
+                    'mvp_count': int(row['mvp_count'] or 0),
+                    'win_rate': round(float(row['win_rate']) if row['win_rate'] is not None else 0, 3),
+                    'avg_kast': round(float(row['avg_kast']) if row['avg_kast'] is not None else 0, 3),
+                    'avg_rws': round(float(row['avg_rws']) if row['avg_rws'] is not None else 0, 2)
+                },
+                'last_match_time': row.get('last_match_time')
+            }
+            leaderboard_data.append(player_data)
+
+        return jsonify({'success': True, 'data': leaderboard_data, 'meta': {'stat_type': stat_type, 'map_filter': map_filter}})
+    except Exception as e:
+        logger.error(f"获取自定义比赛排行榜错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments/<int:tournament_id>/matches', methods=['POST'])
+def link_match_to_tournament(tournament_id):
+    """关联比赛到自定义比赛"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['match_id']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'success': False, 'error': f'缺少必需字段: {field}'}), 400
+        
+        # 检查比赛是否存在
+        match_check_query = "SELECT match_id, match_winner FROM matches WHERE match_id = %s"
+        match_exists = execute_query(match_check_query, [data['match_id']])
+        
+        if not match_exists:
+            return jsonify({'success': False, 'error': '比赛不存在'}), 404
+        
+        # 如果未指定team1_id或team2_id，则根据比赛玩家自动生成或复用队伍
+        team1_id = data.get('team1_id')
+        team2_id = data.get('team2_id')
+
+        try:
+            # 查询该比赛的两队玩家UID
+            team1_players = execute_query(
+                "SELECT uid FROM match_player_stats WHERE match_id = %s AND team_id = 1",
+                [data['match_id']]
+            )
+            team2_players = execute_query(
+                "SELECT uid FROM match_player_stats WHERE match_id = %s AND team_id = 2",
+                [data['match_id']]
+            )
+
+            team1_uids = sorted(list({p['uid'] for p in team1_players}))
+            team2_uids = sorted(list({p['uid'] for p in team2_players}))
+
+            # 防御性校验
+            if (team1_id is None and len(team1_uids) == 0) or (team2_id is None and len(team2_uids) == 0):
+                return jsonify({'success': False, 'error': '无法从比赛数据解析两支队伍的玩家'}), 400
+
+            # 读取已存在的队伍并进行去重匹配（按玩家UID集合匹配）
+            existing_teams = execute_query(
+                "SELECT id, player_uids, team_name FROM custom_tournament_teams WHERE tournament_id = %s",
+                [tournament_id]
+            )
+
+            def find_team_id_by_uids(uids_set):
+                for et in existing_teams or []:
+                    try:
+                        et_uids = json.loads(et['player_uids']) if et.get('player_uids') else []
+                    except Exception:
+                        et_uids = []
+                    if set(et_uids) == set(uids_set):
+                        return et['id']
+                return None
+
+            # 生成或复用队伍1
+            if team1_id is None:
+                team1_id = find_team_id_by_uids(team1_uids)
+                if team1_id is None:
+                    # 选取该队Rating2最高的玩家作为队长，并用其昵称/用户名生成队名
+                    top1 = execute_query(
+                        """
+                        SELECT mps.uid, p.username, p.nickname, mps.rating2
+                        FROM match_player_stats mps
+                        LEFT JOIN players p ON p.uid = mps.uid
+                        WHERE mps.match_id = %s AND mps.team_id = 1
+                        ORDER BY mps.rating2 DESC
+                        LIMIT 1
+                        """,
+                        [data['match_id']]
+                    )
+                    captain1_uid = top1[0]['uid'] if top1 else None
+                    captain1_name = (top1[0].get('nickname') or top1[0].get('username')) if top1 else None
+                    team1_name = f"{captain1_name}的队伍" if captain1_name else "自动队伍1"
+
+                    insert_team1_id = execute_insert_query(
+                        """
+                        INSERT INTO custom_tournament_teams (tournament_id, team_name, player_uids, captain_uid)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        [tournament_id, team1_name, json.dumps(team1_uids), captain1_uid]
+                    )
+                    if not insert_team1_id:
+                        return jsonify({'success': False, 'error': '创建队伍1失败'}), 500
+                    team1_id = insert_team1_id
+
+            # 生成或复用队伍2
+            if team2_id is None:
+                team2_id = find_team_id_by_uids(team2_uids)
+                if team2_id is None:
+                    top2 = execute_query(
+                        """
+                        SELECT mps.uid, p.username, p.nickname, mps.rating2
+                        FROM match_player_stats mps
+                        LEFT JOIN players p ON p.uid = mps.uid
+                        WHERE mps.match_id = %s AND mps.team_id = 2
+                        ORDER BY mps.rating2 DESC
+                        LIMIT 1
+                        """,
+                        [data['match_id']]
+                    )
+                    captain2_uid = top2[0]['uid'] if top2 else None
+                    captain2_name = (top2[0].get('nickname') or top2[0].get('username')) if top2 else None
+                    team2_name = f"{captain2_name}的队伍" if captain2_name else "自动队伍2"
+
+                    insert_team2_id = execute_insert_query(
+                        """
+                        INSERT INTO custom_tournament_teams (tournament_id, team_name, player_uids, captain_uid)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        [tournament_id, team2_name, json.dumps(team2_uids), captain2_uid]
+                    )
+                    if not insert_team2_id:
+                        return jsonify({'success': False, 'error': '创建队伍2失败'}), 500
+                    team2_id = insert_team2_id
+        except Exception as e:
+            logger.error(f"解析并创建队伍失败: {e}")
+            return jsonify({'success': False, 'error': '解析队伍数据失败'}), 500
+
+        # 插入关联记录
+        # 根据 matches.match_winner 映射到当前的 team1_id / team2_id，确定 winner_team_id
+        winner_team_id = None
+        try:
+            original_winner = match_exists[0].get('match_winner') if match_exists else None
+            if original_winner == 1:
+                winner_team_id = team1_id
+            elif original_winner == 2:
+                winner_team_id = team2_id
+        except Exception:
+            winner_team_id = None
+
+        link_query = """
+        INSERT INTO custom_tournament_matches 
+        (tournament_id, match_id, team1_id, team2_id, round_name, match_order, winner_team_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        link_params = [
+            tournament_id,
+            data['match_id'],
+            team1_id,
+            team2_id,
+            data.get('round_name', ''),
+            data.get('match_order', 0),
+            winner_team_id
+        ]
+        
+        link_id = execute_insert_query(link_query, link_params)
+        
+        if not link_id:
+            return jsonify({'success': False, 'error': '关联比赛失败'}), 500
+        
+        # 更新 total_matches 为当前关联场数
+        update_total_query = """
+        UPDATE custom_tournaments
+        SET total_matches = (
+            SELECT COUNT(*)
+            FROM custom_tournament_matches
+            WHERE tournament_id = %s
+        )
+        WHERE id = %s
+        """
+        try:
+            execute_update_query(update_total_query, [tournament_id, tournament_id])
+        except Exception as e:
+            logger.error(f"更新total_matches失败: {e}")
+        
+        return jsonify({
+            'success': True,
+            'data': {'link_id': link_id, 'team1_id': team1_id, 'team2_id': team2_id},
+            'message': '比赛关联成功，队伍已自动生成/复用'
+        })
+        
+    except Exception as e:
+        logger.error(f"关联比赛错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/custom-tournaments/<int:tournament_id>/matches/<int:link_id>', methods=['DELETE'])
+def unlink_match_from_tournament(tournament_id, link_id):
+    """取消关联比赛"""
+    try:
+        delete_query = """
+        DELETE FROM custom_tournament_matches 
+        WHERE id = %s AND tournament_id = %s
+        """
+        success = execute_update_query(delete_query, [link_id, tournament_id])
+        
+        if not success:
+            return jsonify({'success': False, 'error': '取消关联失败'}), 500
+        
+        # 更新 total_matches 为当前关联场数
+        update_total_query = """
+        UPDATE custom_tournaments
+        SET total_matches = (
+            SELECT COUNT(*)
+            FROM custom_tournament_matches
+            WHERE tournament_id = %s
+        )
+        WHERE id = %s
+        """
+        try:
+            execute_update_query(update_total_query, [tournament_id, tournament_id])
+        except Exception as e:
+            logger.error(f"更新total_matches失败: {e}")
+        
+        return jsonify({
+            'success': True,
+            'message': '取消关联成功'
+        })
+        
+    except Exception as e:
+        logger.error(f"取消关联比赛错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/matches/available', methods=['GET'])
+def get_available_matches():
+    """获取可用于关联的比赛列表"""
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+        search = request.args.get('search', '')
+        
+        # 构建查询 - 获取还未被关联到任何自定义比赛的比赛
+        base_query = """
+        SELECT 
+            m.match_id,
+            m.map_name,
+            m.start_time,
+            m.group1_all_score,
+            m.group2_all_score,
+            m.match_winner
+        FROM matches m
+        LEFT JOIN custom_tournament_matches ctm ON m.match_id = ctm.match_id
+        WHERE ctm.match_id IS NULL
+        """
+        params = []
+        
+        if search:
+            base_query += " AND (m.match_id LIKE %s OR m.map_name LIKE %s)"
+            search_param = f"%{search}%"
+            params.extend([search_param, search_param])
+        
+        base_query += " ORDER BY m.start_time DESC LIMIT %s OFFSET %s"
+        params.extend([limit, (page - 1) * limit])
+        
+        matches = execute_query(base_query, params)
+        
+        return jsonify({
+            'success': True,
+            'data': matches or []
+        })
+        
+    except Exception as e:
+        logger.error(f"获取可用比赛错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     logger.info("启动CS:GO玩家数据API服务器...")

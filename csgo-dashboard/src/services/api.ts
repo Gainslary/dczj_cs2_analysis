@@ -45,11 +45,10 @@ api.interceptors.response.use(
 
 // API接口定义
 export interface Player {
+  uid: number;
   steam_id: string;
   username: string;
-  nickname: string;
-  platform_level: number;
-  avatar_url: string;
+  platform_level?: number;
   total_matches: number;
 }
 
@@ -535,26 +534,291 @@ export const leaderboardAPI = {
     statType: string = 'rating2',
     mapFilter: string = ''
   ): Promise<LeaderboardResponse> => {
-    const params = new URLSearchParams({
-      stat: statType
-    });
-    
+    const params = new URLSearchParams();
+    params.append('stat_type', statType);
     if (mapFilter) params.append('map', mapFilter);
     
     const response = await api.get<LeaderboardResponse>(`/leaderboard?${params.toString()}`);
     return response.data;
   },
 
-  // 获取可用的统计类型
+  // 获取统计类型列表
   getStatsTypes: async (): Promise<StatType[]> => {
     const response = await api.get<{success: boolean; data: StatType[]}>('/leaderboard/stats-types');
     return response.data.data;
   },
 
-  // 获取筛选选项
+  // 获取过滤器选项
   getFilters: async (): Promise<LeaderboardFilters> => {
     const response = await api.get<{success: boolean; data: LeaderboardFilters}>('/leaderboard/filters');
     return response.data.data;
+  },
+};
+
+// ========================================
+// 自定义比赛模块接口定义
+// ========================================
+
+export interface CustomTournament {
+  id: number;
+  name: string;
+  description?: string;
+  start_time: number;
+  end_time: number;
+  status: 'draft' | 'active' | 'completed' | 'cancelled';
+  creator_uid: number;
+  creator_username?: string;
+  creator_nickname?: string;
+  total_matches: number;
+  completed_matches: number;
+  team_count: number;
+  match_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomTournamentTeam {
+  id: number;
+  tournament_id: number;
+  team_name: string;
+  player_uids: number[];
+  captain_uid?: number;
+  captain_username?: string;
+  captain_nickname?: string;
+  wins: number;
+  losses: number;
+  total_rounds_won: number;
+  total_rounds_lost: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomTournamentMatch {
+  id: number;
+  tournament_id: number;
+  match_id: string;
+  team1_id?: number;
+  team2_id?: number;
+  team1_name?: string;
+  team2_name?: string;
+  round_name?: string;
+  match_order: number;
+  winner_team_id?: number;
+  map_name?: string;
+  match_start_time?: number;
+  group1_all_score?: number;
+  group2_all_score?: number;
+  original_winner?: number;
+  linked_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomTournamentDetail extends CustomTournament {
+  teams: CustomTournamentTeam[];
+  matches: CustomTournamentMatch[];
+}
+
+export interface CustomTournamentsResponse {
+  success: boolean;
+  data: CustomTournament[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export interface CustomTournamentDetailResponse {
+  success: boolean;
+  data: CustomTournamentDetail;
+}
+
+export interface CreateCustomTournamentRequest {
+  name: string;
+  description?: string;
+  start_time: number;
+  end_time: number;
+  creator_uid: number;
+  teams: {
+    team_name: string;
+    player_uids: number[];
+    captain_uid?: number;
+  }[];
+}
+
+export interface AvailableMatch {
+  match_id: string;
+  map_name: string;
+  start_time: number;
+  group1_all_score: number;
+  group2_all_score: number;
+  match_winner: number;
+}
+
+export interface AvailableMatchesResponse {
+  success: boolean;
+  data: AvailableMatch[];
+}
+
+// 新增：自定义比赛队伍统计类型
+export interface CustomTournamentTeamStatsItem {
+  team_id: number;
+  team_name: string;
+  matches_played: number;
+  wins: number;
+  losses: number;
+  win_rate: number; // 百分比 0-100
+  total_kills: number;
+  total_deaths: number;
+  total_assists: number;
+}
+
+export interface CustomTournamentTeamStatsResponse {
+  success: boolean;
+  data: CustomTournamentTeamStatsItem[];
+}
+
+// 新增：自定义比赛排行榜返回类型（与全局排行榜结构一致）
+export interface TournamentLeaderboardResponse {
+  success: boolean;
+  data: LeaderboardPlayer[];
+  meta: { stat_type: string; map_filter: string };
+}
+
+export const customTournamentsAPI = {
+  // 获取自定义比赛列表
+  getTournaments: async (
+    page: number = 1,
+    limit: number = 10,
+    status?: string,
+    search?: string
+  ): Promise<CustomTournamentsResponse> => {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('limit', limit.toString());
+    if (status) params.append('status', status);
+    if (search) params.append('search', search);
+    
+    const response = await api.get<CustomTournamentsResponse>(`/custom-tournaments?${params.toString()}`);
+    return response.data;
+  },
+
+  // 获取自定义比赛详情
+  getTournamentDetail: async (tournamentId: number): Promise<CustomTournamentDetailResponse> => {
+    const response = await api.get<CustomTournamentDetailResponse>(`/custom-tournaments/${tournamentId}`);
+    return response.data;
+  },
+
+  // 创建自定义比赛
+  createTournament: async (data: CreateCustomTournamentRequest): Promise<{ success: boolean; data: { tournament_id: number }; message: string }> => {
+    const response = await api.post<{ success: boolean; data: { tournament_id: number }; message: string }>('/custom-tournaments', data);
+    return response.data;
+  },
+
+  // 更新自定义比赛
+  updateTournament: async (
+    tournamentId: number,
+    data: Partial<Pick<CustomTournament, 'name' | 'description' | 'start_time' | 'end_time' | 'status'>>
+  ): Promise<{ success: boolean; message: string }> => {
+    const response = await api.put<{ success: boolean; message: string }>(`/custom-tournaments/${tournamentId}`, data);
+    return response.data;
+  },
+
+  // 删除自定义比赛
+  deleteTournament: async (tournamentId: number): Promise<{ success: boolean; message: string }> => {
+    const response = await api.delete<{ success: boolean; message: string }>(`/custom-tournaments/${tournamentId}`);
+    return response.data;
+  },
+
+  // 更新比赛中的队伍信息
+  updateTeam: async (
+    tournamentId: number,
+    teamId: number,
+    data: { team_name?: string; player_uids?: number[]; captain_uid?: number | null }
+  ): Promise<{ success: boolean; message: string }> => {
+    const response = await api.put<{ success: boolean; message: string }>(
+      `/custom-tournaments/${tournamentId}/teams/${teamId}`,
+      data
+    );
+    return response.data;
+  },
+
+  // 删除比赛中的队伍
+  deleteTeam: async (
+    tournamentId: number,
+    teamId: number
+  ): Promise<{ success: boolean; message: string }> => {
+    const response = await api.delete<{ success: boolean; message: string }>(
+      `/custom-tournaments/${tournamentId}/teams/${teamId}`
+    );
+    return response.data;
+  },
+
+  // 新增：获取自定义比赛的队伍统计
+  getTeamStats: async (
+    tournamentId: number
+  ): Promise<CustomTournamentTeamStatsResponse> => {
+    const response = await api.get<CustomTournamentTeamStatsResponse>(
+      `/custom-tournaments/${tournamentId}/stats/teams`
+    );
+    return response.data;
+  },
+
+  // 关联比赛到自定义比赛
+  linkMatch: async (
+    tournamentId: number,
+    data: {
+      match_id: string;
+      team1_id?: number;
+      team2_id?: number;
+      round_name?: string;
+      match_order?: number;
+    }
+  ): Promise<{ success: boolean; message: string }> => {
+    const response = await api.post<{ success: boolean; message: string }>(
+      `/custom-tournaments/${tournamentId}/matches`,
+      data
+    );
+    return response.data;
+  },
+
+  // 新增：获取限定于自定义比赛范围的玩家排行榜
+  getTournamentLeaderboard: async (
+    tournamentId: number,
+    statType: string = 'rating2',
+    mapFilter: string = ''
+  ): Promise<TournamentLeaderboardResponse> => {
+    const params = new URLSearchParams();
+    params.append('stat_type', statType);
+    if (mapFilter) params.append('map', mapFilter);
+
+    const response = await api.get<TournamentLeaderboardResponse>(
+      `/custom-tournaments/${tournamentId}/leaderboard?${params.toString()}`
+    );
+    return response.data;
+  },
+
+  // 取消关联比赛
+  unlinkMatch: async (tournamentId: number, linkId: number): Promise<{ success: boolean; message: string }> => {
+    const response = await api.delete<{ success: boolean; message: string }>(`/custom-tournaments/${tournamentId}/matches/${linkId}`);
+    return response.data;
+  },
+
+  // 获取可用于关联的比赛列表
+  getAvailableMatches: async (
+    page: number = 1,
+    limit: number = 20,
+    search?: string
+  ): Promise<AvailableMatchesResponse> => {
+    const params = new URLSearchParams();
+    params.append('page', page.toString());
+    params.append('limit', limit.toString());
+    if (search) params.append('search', search);
+    
+    const response = await api.get<AvailableMatchesResponse>(`/matches/available?${params.toString()}`);
+    return response.data;
   },
 };
 

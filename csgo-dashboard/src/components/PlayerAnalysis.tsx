@@ -245,7 +245,7 @@ const PlayerAnalysis: React.FC = () => {
                 >
                   {availablePlayers.map(player => (
                     <Option key={player.steam_id} value={player.steam_id}>
-                      {player.nickname} ({player.total_matches} 场比赛)
+                      {player.username} ({player.total_matches} 场比赛)
                     </Option>
                   ))}
                 </Select>

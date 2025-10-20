@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Typography } from 'antd';
-import { TrophyOutlined, UserOutlined, CrownOutlined } from '@ant-design/icons';
+import { TrophyOutlined, UserOutlined, CrownOutlined, CalendarOutlined } from '@ant-design/icons';
 import MatchesDashboard from './components/MatchesDashboard';
 import PlayerAnalysis from './components/PlayerAnalysis';
 import Leaderboard from './components/Leaderboard';
+import CustomTournaments from './components/CustomTournaments';
 import './App.css';
 
 const { Header, Content } = Layout;
@@ -24,6 +25,7 @@ function AppContent() {
     const path = location.pathname;
     if (path.includes('/players')) return 'players';
     if (path.includes('/leaderboard')) return 'leaderboard';
+    if (path.includes('/custom-tournaments')) return 'custom-tournaments';
     return 'matches';
   };
 
@@ -32,6 +34,11 @@ function AppContent() {
       key: 'matches',
       icon: <TrophyOutlined />,
       label: '比赛列表',
+    },
+    {
+      key: 'custom-tournaments',
+      icon: <CalendarOutlined />,
+      label: '自定义比赛',
     },
     {
       key: 'players',
@@ -59,6 +66,7 @@ function AppContent() {
             items={menuItems}
             onClick={({ key }) => {
               if (key === 'matches') navigate('/matches');
+              else if (key === 'custom-tournaments') navigate('/custom-tournaments');
               else if (key === 'players') navigate('/players');
               else if (key === 'leaderboard') navigate('/leaderboard');
             }}
@@ -72,6 +80,10 @@ function AppContent() {
           <Route 
             path="/matches" 
             element={<MatchesDashboard />} 
+          />
+          <Route 
+            path="/custom-tournaments" 
+            element={<CustomTournaments />} 
           />
           <Route 
             path="/players" 

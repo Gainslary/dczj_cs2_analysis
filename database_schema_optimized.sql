@@ -336,3 +336,125 @@ FROM match_player_stats mps
 LEFT JOIN match_player_vip_stats mpv ON mps.match_id = mpv.match_id AND mps.steam_id = mpv.steam_id
 LEFT JOIN players p ON mps.uid = p.uid
 LEFT JOIN matches m ON mps.match_id = m.match_id;
+
+-- ========================================
+-- 自定义比赛模块相关表
+-- ========================================
+
+-- 自定义比赛表
+CREATE TABLE IF NOT EXISTS custom_tournaments (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(200) NOT NULL COMMENT '比赛名称',
+    description TEXT COMMENT '比赛描述',
+    
+    -- 时间信息
+    start_time BIGINT NOT NULL COMMENT '比赛开始时间戳',
+    end_time BIGINT NOT NULL COMMENT '比赛结束时间戳',
+    
+    -- 状态信息
+    status ENUM('draft', 'active', 'completed', 'cancelled') DEFAULT 'draft' COMMENT '比赛状态',
+    
+    -- 创建者信息
+    creator_uid BIGINT NOT NULL COMMENT '创建者UID',
+    
+    -- 统计信息
+    total_matches INT DEFAULT 0 COMMENT '总比赛场数',
+    completed_matches INT DEFAULT 0 COMMENT '已完成比赛场数',
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_creator_uid (creator_uid),
+    INDEX idx_status (status),
+    INDEX idx_start_time (start_time),
+    INDEX idx_name (name),
+    FOREIGN KEY (creator_uid) REFERENCES players(uid) ON DELETE CASCADE
+) ENGINE=InnoDB COMMENT='自定义比赛表';
+
+-- 自定义比赛队伍表
+CREATE TABLE IF NOT EXISTS custom_tournament_teams (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tournament_id BIGINT NOT NULL COMMENT '比赛ID',
+    team_name VARCHAR(100) NOT NULL COMMENT '队伍名称',
+    
+    -- 队员信息（存储UID列表，JSON格式）
+    player_uids JSON NOT NULL COMMENT '队员UID列表',
+    
+    -- 队长信息
+    captain_uid BIGINT COMMENT '队长UID',
+    
+    -- 统计信息
+    wins INT DEFAULT 0 COMMENT '胜场数',
+    losses INT DEFAULT 0 COMMENT '负场数',
+    total_rounds_won INT DEFAULT 0 COMMENT '总赢得回合数',
+    total_rounds_lost INT DEFAULT 0 COMMENT '总失败回合数',
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_tournament_id (tournament_id),
+    INDEX idx_captain_uid (captain_uid),
+    INDEX idx_team_name (team_name),
+    FOREIGN KEY (tournament_id) REFERENCES custom_tournaments(id) ON DELETE CASCADE,
+    FOREIGN KEY (captain_uid) REFERENCES players(uid) ON DELETE SET NULL
+) ENGINE=InnoDB COMMENT='自定义比赛队伍表';
+
+-- 自定义比赛关联matches表
+CREATE TABLE IF NOT EXISTS custom_tournament_matches (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tournament_id BIGINT NOT NULL COMMENT '比赛ID',
+    match_id VARCHAR(100) NOT NULL COMMENT '关联的比赛ID',
+    
+    -- 队伍信息
+    team1_id BIGINT COMMENT '队伍1 ID',
+    team2_id BIGINT COMMENT '队伍2 ID',
+    
+    -- 比赛阶段信息
+    round_name VARCHAR(100) COMMENT '比赛轮次名称（如：小组赛、半决赛等）',
+    match_order INT DEFAULT 0 COMMENT '比赛顺序',
+    
+    -- 比赛结果
+    winner_team_id BIGINT COMMENT '获胜队伍ID',
+    
+    -- 关联时间
+    linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '关联时间',
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    UNIQUE KEY uk_tournament_match (tournament_id, match_id),
+    INDEX idx_tournament_id (tournament_id),
+    INDEX idx_match_id (match_id),
+    INDEX idx_team1_id (team1_id),
+    INDEX idx_team2_id (team2_id),
+    INDEX idx_winner_team_id (winner_team_id),
+    FOREIGN KEY (tournament_id) REFERENCES custom_tournaments(id) ON DELETE CASCADE,
+    FOREIGN KEY (match_id) REFERENCES matches(match_id) ON DELETE CASCADE,
+    FOREIGN KEY (team1_id) REFERENCES custom_tournament_teams(id) ON DELETE SET NULL,
+    FOREIGN KEY (team2_id) REFERENCES custom_tournament_teams(id) ON DELETE SET NULL,
+    FOREIGN KEY (winner_team_id) REFERENCES custom_tournament_teams(id) ON DELETE SET NULL
+) ENGINE=InnoDB COMMENT='自定义比赛关联matches表';
+
+-- 创建视图：自定义比赛完整信息
+CREATE OR REPLACE VIEW custom_tournament_complete_view AS
+SELECT 
+    ct.*,
+    p.username as creator_username,
+    COUNT(DISTINCT ctt.id) as team_count,
+    COUNT(DISTINCT ctm.id) as match_count
+FROM custom_tournaments ct
+LEFT JOIN players p ON ct.creator_uid = p.uid
+LEFT JOIN custom_tournament_teams ctt ON ct.id = ctt.tournament_id
+LEFT JOIN custom_tournament_matches ctm ON ct.id = ctm.tournament_id
+GROUP BY ct.id;
+
+-- 创建视图：自定义比赛队伍详细信息
+CREATE OR REPLACE VIEW custom_tournament_team_details AS
+SELECT 
+    ctt.*,
+    ct.name as tournament_name,
+    ct.status as tournament_status,
+    p.username as captain_username
+FROM custom_tournament_teams ctt
+LEFT JOIN custom_tournaments ct ON ctt.tournament_id = ct.id
+LEFT JOIN players p ON ctt.captain_uid = p.uid;
