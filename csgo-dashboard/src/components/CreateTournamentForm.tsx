@@ -151,6 +151,60 @@ const CreateTournamentForm: React.FC<CreateTournamentFormProps> = ({
     ));
   };
 
+  // 自定义验证规则
+  const validateName = (_: any, value: string) => {
+    if (!value || value.trim() === '') {
+      return Promise.reject(new Error('比赛名称不能为空'));
+    }
+    if (value.length > 100) {
+      return Promise.reject(new Error('比赛名称最多100字符'));
+    }
+    // 检查非法字符
+    if (/[<>'"&]/.test(value)) {
+      return Promise.reject(new Error('比赛名称包含非法字符'));
+    }
+    return Promise.resolve();
+  };
+
+  const validateTimeRange = (_: any, value: any) => {
+    if (!value || !value[0] || !value[1]) {
+      return Promise.reject(new Error('请选择比赛时间'));
+    }
+
+    const now = dayjs();
+    const startTime = value[0];
+    const endTime = value[1];
+
+    if (startTime.isAfter(endTime)) {
+      return Promise.reject(new Error('开始时间必须早于结束时间'));
+    }
+
+    // 检查开始时间不能早于24小时前
+    const oneDayAgo = now.subtract(24, 'hour');
+    if (startTime.isBefore(oneDayAgo)) {
+      return Promise.reject(new Error('开始时间不能早于24小时前'));
+    }
+
+    return Promise.resolve();
+  };
+
+  const validateDescription = (_: any, value: string) => {
+    if (value && value.length > 1000) {
+      return Promise.reject(new Error('比赛描述最多1000字符'));
+    }
+    if (value && /[<>'"&]/.test(value)) {
+      return Promise.reject(new Error('比赛描述包含非法字符'));
+    }
+    return Promise.resolve();
+  };
+
+  const validateCreator = (_: any, value: number) => {
+    if (!value || value <= 0) {
+      return Promise.reject(new Error('请选择有效的创建者'));
+    }
+    return Promise.resolve();
+  };
+
   // 提交表单
   const handleSubmit = async (values: any) => {
     setLoading(true);
@@ -166,8 +220,8 @@ const CreateTournamentForm: React.FC<CreateTournamentFormProps> = ({
       }
 
       const createData: CreateCustomTournamentRequest = {
-        name: values.name,
-        description: values.description || '',
+        name: values.name.trim(),
+        description: values.description?.trim() || '',
         start_time: startTime,
         end_time: endTime,
         creator_uid: creatorUid,
@@ -179,10 +233,18 @@ const CreateTournamentForm: React.FC<CreateTournamentFormProps> = ({
         message.success('创建成功');
         handleCancel();
         onSuccess();
+      } else {
+        // 显示服务器返回的具体错误信息
+        message.error(response.error || '创建比赛失败');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('创建比赛失败:', error);
-      message.error('创建比赛失败');
+      // 尝试从错误响应中获取详细错误信息
+      if (error.response?.data?.error) {
+        message.error(error.response.data.error);
+      } else {
+        message.error('创建比赛失败，请检查输入信息');
+      }
     } finally {
       setLoading(false);
     }
@@ -232,21 +294,28 @@ const CreateTournamentForm: React.FC<CreateTournamentFormProps> = ({
               <Form.Item
                 name="name"
                 label="比赛名称"
-                rules={[{ required: true, message: '请输入比赛名称' }]}
+                rules={[
+                  { required: true, message: '请输入比赛名称' },
+                  { validator: validateName }
+                ]}
               >
-                <Input placeholder="请输入比赛名称" />
+                <Input placeholder="请输入比赛名称" showCount maxLength={100} />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item
                 name="timeRange"
                 label="比赛时间"
-                rules={[{ required: true, message: '请选择比赛时间' }]}
+                rules={[
+                  { required: true, message: '请选择比赛时间' },
+                  { validator: validateTimeRange }
+                ]}
               >
                 <RangePicker
                   showTime
                   format="YYYY-MM-DD HH:mm"
                   style={{ width: '100%' }}
+                  placeholder={['开始时间', '结束时间']}
                 />
               </Form.Item>
             </Col>
@@ -255,10 +324,13 @@ const CreateTournamentForm: React.FC<CreateTournamentFormProps> = ({
           <Form.Item
             name="description"
             label="比赛描述"
+            rules={[{ validator: validateDescription }]}
           >
             <TextArea
               placeholder="请输入比赛描述"
               rows={3}
+              showCount
+              maxLength={1000}
             />
           </Form.Item>
         </Card>
@@ -270,7 +342,10 @@ const CreateTournamentForm: React.FC<CreateTournamentFormProps> = ({
               <Form.Item
                 name="creator_uid"
                 label="创建者"
-                rules={[{ required: true, message: '请选择创建者' }]}
+                rules={[
+                  { required: true, message: '请选择创建者' },
+                  { validator: validateCreator }
+                ]}
               >
                 <Select
                   showSearch

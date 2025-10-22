@@ -5,10 +5,12 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import mysql.connector
 from mysql.connector import Error
+from mysql.connector import pooling
 import json
 import os
 from datetime import datetime, date
 import logging
+import time
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -26,17 +28,37 @@ class DateTimeEncoder(json.JSONEncoder):
 
 app.json_encoder = DateTimeEncoder
 
+# 创建数据库连接池
+try:
+    DATABASE_CONFIG = {
+        'host': os.getenv('DB_HOST', '106.14.121.148'),
+        'user': os.getenv('DB_USER', 'root'),
+        'password': os.getenv('DB_PASSWORD', '9AkWaqCsrd12'),
+        'database': os.getenv('DB_NAME', 'cs_match_data')
+    }
+
+    # 创建连接池
+    connection_pool = mysql.connector.pooling.MySQLConnectionPool(
+        pool_name="csgo_pool",
+        pool_size=5,  # 连接池大小
+        pool_reset_session=True,
+        **DATABASE_CONFIG
+    )
+    logger.info("数据库连接池初始化成功")
+except Exception as e:
+    logger.error(f"数据库连接池初始化失败: {e}")
+    connection_pool = None
+
 def get_database_connection():
-    """获取数据库连接"""
+    """从连接池获取数据库连接"""
     try:
-        DATABASE_CONFIG = {
-            'host': os.getenv('DB_HOST', '106.14.121.148'),
-            'user': os.getenv('DB_USER', 'root'),
-            'password': os.getenv('DB_PASSWORD', '9AkWaqCsrd12'),
-            'database': os.getenv('DB_NAME', 'cs_match_data')
-        }
-        connection = mysql.connector.connect(**DATABASE_CONFIG)
-        return connection
+        if connection_pool:
+            connection = connection_pool.get_connection()
+            return connection
+        else:
+            # 备用方案：直接创建连接
+            connection = mysql.connector.connect(**DATABASE_CONFIG)
+            return connection
     except Error as e:
         logger.error(f"数据库连接错误: {e}")
         return None
@@ -255,11 +277,14 @@ def get_maps():
 
 @app.route('/api/players/search', methods=['GET'])
 def search_players():
+    start_time = time.time()  # 性能监控
     try:
         import urllib.parse
-        
+
         nickname = request.args.get('nickname', '').strip()
         limit = min(int(request.args.get('limit', 20)), 50)  # 最多返回50个结果（仅用于有搜索词时）
+
+        logger.info(f"玩家搜索请求: nickname='{nickname}', limit={limit}")
         
         # 确保正确解码URL编码的中文字符
         try:
@@ -271,18 +296,21 @@ def search_players():
         except:
             pass  # 如果解码失败，使用原始字符串
         
-        # 当未提供昵称时，返回全部玩家列表（不限制数量）
+        # 当未提供昵称时，返回全部玩家列表（优化性能，使用JOIN避免N+1查询）
         if not nickname:
-            # 直接查询所有玩家（仅返回必要字段）
+            # 使用JOIN一次性查询所有必要数据，避免N+1查询问题
             all_players_query = """
-            SELECT 
-                uid,
-                steam_id,
-                username,
-                platform_level
-            FROM players
-            WHERE username IS NOT NULL
-            ORDER BY platform_level DESC, username
+            SELECT
+                p.uid,
+                p.steam_id,
+                p.username,
+                p.platform_level,
+                COUNT(DISTINCT pmcs.match_id) as total_matches
+            FROM players p
+            LEFT JOIN player_match_complete_stats pmcs ON p.steam_id = pmcs.steam_id
+            WHERE p.username IS NOT NULL
+            GROUP BY p.uid, p.steam_id, p.username, p.platform_level
+            ORDER BY p.platform_level DESC, p.username
             """
             connection = get_database_connection()
             cursor = connection.cursor(dictionary=True)
@@ -291,22 +319,25 @@ def search_players():
             cursor.close()
             connection.close()
         else:
-            # 模糊查询玩家 - 直接从players表搜索，同时搜索原始字符和Unicode转义形式
+            # 模糊查询玩家 - 使用JOIN优化，避免N+1查询问题
             search_query = """
-            SELECT 
-                uid,
-                steam_id,
-                username,
-                platform_level
-            FROM players
-            WHERE (username LIKE %s OR username LIKE %s)
-            AND username IS NOT NULL
+            SELECT
+                p.uid,
+                p.steam_id,
+                p.username,
+                p.platform_level,
+                COUNT(DISTINCT pmcs.match_id) as total_matches
+            FROM players p
+            LEFT JOIN player_match_complete_stats pmcs ON p.steam_id = pmcs.steam_id
+            WHERE (p.username LIKE %s OR p.username LIKE %s)
+            AND p.username IS NOT NULL
+            GROUP BY p.uid, p.steam_id, p.username, p.platform_level
             LIMIT %s
             """
-            
+
             # 准备两种搜索模式
             search_pattern = f"%{nickname}%"
-            
+
             # 将中文字符转换为Unicode转义序列（使用正确的格式）
             unicode_escaped = ""
             for char in nickname:
@@ -315,7 +346,7 @@ def search_players():
                 else:
                     unicode_escaped += char
             unicode_pattern = f"%{unicode_escaped}%"
-            
+
             # 直接使用MySQL连接执行查询
             connection = get_database_connection()
             cursor = connection.cursor(dictionary=True)
@@ -331,41 +362,30 @@ def search_players():
                 'message': '未找到匹配的玩家'
             })
         
-        # 格式化返回数据并查询每个玩家的比赛总数
+        # 直接格式化返回数据，已经通过JOIN获得total_matches
         formatted_players = []
         for player in players:
-            # 查询该玩家的比赛总数
-            match_count_query = """
-            SELECT COUNT(DISTINCT match_id) as total_matches
-            FROM player_match_complete_stats
-            WHERE steam_id = %s
-            """
-            
-            connection = get_database_connection()
-            cursor = connection.cursor(dictionary=True)
-            cursor.execute(match_count_query, (player['steam_id'],))
-            match_count_result = cursor.fetchone()
-            cursor.close()
-            connection.close()
-            
-            total_matches = match_count_result['total_matches'] if match_count_result else 0
-            
             formatted_players.append({
                 'uid': player['uid'],
                 'steam_id': player['steam_id'],
                 'username': player['username'],
                 'platform_level': player.get('platform_level') or 0,
-                'total_matches': total_matches
+                'total_matches': player.get('total_matches') or 0  # 从JOIN结果中获取
             })
         
+        # 性能监控
+        elapsed_time = time.time() - start_time
+        logger.info(f"玩家搜索完成: 返回{len(formatted_players)}个结果, 耗时{elapsed_time:.2f}秒")
+
         return jsonify({
             'players': formatted_players,
             'total': len(formatted_players),
             'search_term': nickname
         })
-        
+
     except Exception as e:
-        logger.error(f"搜索玩家错误: {e}")
+        elapsed_time = time.time() - start_time
+        logger.error(f"搜索玩家错误: {e}, 耗时{elapsed_time:.2f}秒")
         return jsonify({'error': '服务器内部错误'}), 500
 
 @app.route('/api/player/<steam_id>', methods=['GET'])
@@ -1197,6 +1217,101 @@ def internal_error(error):
 # 自定义比赛模块API接口
 # ========================================
 
+import time
+import re
+from datetime import datetime
+
+def validate_tournament_data(data):
+    """验证比赛数据"""
+    errors = []
+
+    # 比赛名称验证
+    name = data.get('name', '').strip()
+    if not name:
+        errors.append('比赛名称不能为空')
+    elif len(name) > 100:
+        errors.append('比赛名称过长（最多100字符）')
+    elif re.search(r'[<>\'"&]', name):
+        errors.append('比赛名称包含非法字符')
+
+    # 时间验证
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
+
+    if start_time is None:
+        errors.append('缺少开始时间')
+    elif not isinstance(start_time, (int, float)) or start_time <= 0:
+        errors.append('开始时间格式无效')
+
+    if end_time is None:
+        errors.append('缺少结束时间')
+    elif not isinstance(end_time, (int, float)) or end_time <= 0:
+        errors.append('结束时间格式无效')
+
+    if start_time and end_time:
+        if start_time >= end_time:
+            errors.append('开始时间必须早于结束时间')
+        # 检查开始时间不能早于当前时间超过24小时（允许创建过去的比赛用于测试）
+        if start_time < time.time() - 86400:
+            errors.append('开始时间不能早于24小时前')
+
+    # 创建者验证
+    creator_uid = data.get('creator_uid')
+    if creator_uid is None:
+        errors.append('缺少创建者UID')
+    elif not isinstance(creator_uid, int) or creator_uid <= 0:
+        errors.append('无效的创建者UID')
+
+    # 描述验证（可选）
+    description = data.get('description', '')
+    if description and len(description) > 1000:
+        errors.append('比赛描述过长（最多1000字符）')
+    elif description and re.search(r'[<>\'"&]', description):
+        errors.append('比赛描述包含非法字符')
+
+    return errors
+
+def validate_team_data(team_data, tournament_id):
+    """验证队伍数据"""
+    errors = []
+
+    if not isinstance(team_data, dict):
+        errors.append('队伍数据格式无效')
+        return errors
+
+    # 队伍名称验证
+    team_name = team_data.get('team_name', '').strip()
+    if not team_name:
+        errors.append('队伍名称不能为空')
+    elif len(team_name) > 50:
+        errors.append('队伍名称过长（最多50字符）')
+    elif re.search(r'[<>\'"&]', team_name):
+        errors.append('队伍名称包含非法字符')
+
+    # 队员UID列表验证
+    player_uids = team_data.get('player_uids', [])
+    if not isinstance(player_uids, list):
+        errors.append('队员列表格式无效')
+    else:
+        # 检查UID格式
+        invalid_uids = [uid for uid in player_uids if not isinstance(uid, int) or uid <= 0]
+        if invalid_uids:
+            errors.append(f'发现无效的队员UID: {invalid_uids}')
+
+        # 检查重复
+        if len(player_uids) != len(set(player_uids)):
+            errors.append('队员列表中存在重复的UID')
+
+    # 队长验证（可选）
+    captain_uid = team_data.get('captain_uid')
+    if captain_uid is not None:
+        if not isinstance(captain_uid, int) or captain_uid <= 0:
+            errors.append('无效的队长UID')
+        elif player_uids and captain_uid not in player_uids:
+            errors.append('队长必须在队员列表中')
+
+    return errors
+
 def execute_insert_query(query, params=None):
     """执行插入查询并返回插入的ID"""
     connection = get_database_connection()
@@ -1305,13 +1420,15 @@ def create_custom_tournament():
     """创建自定义比赛"""
     try:
         data = request.get_json()
-        
-        # 验证必需字段（teams 改为可选，允许在关联比赛时自动生成队伍）
-        required_fields = ['name', 'start_time', 'end_time', 'creator_uid']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'success': False, 'error': f'缺少必需字段: {field}'}), 400
-        
+
+        if not data:
+            return jsonify({'success': False, 'error': '请求数据不能为空'}), 400
+
+        # 使用增强的数据验证
+        validation_errors = validate_tournament_data(data)
+        if validation_errors:
+            return jsonify({'success': False, 'error': '; '.join(validation_errors)}), 400
+
         # 校验创建者是否存在于 players 表
         try:
             creator_check = execute_query("SELECT uid FROM players WHERE uid = %s", [data['creator_uid']])
@@ -1342,6 +1459,17 @@ def create_custom_tournament():
         # 插入队伍信息（如果提供了teams）
         teams_data = data.get('teams')
         if isinstance(teams_data, list) and len(teams_data) > 0:
+            # 验证所有队伍数据
+            team_validation_errors = []
+            for i, team in enumerate(teams_data):
+                errors = validate_team_data(team, tournament_id)
+                if errors:
+                    team_validation_errors.append(f"队伍{i+1}: {'; '.join(errors)}")
+
+            if team_validation_errors:
+                return jsonify({'success': False, 'error': '; '.join(team_validation_errors)}), 400
+
+            # 创建队伍
             for team in teams_data:
                 team_query = """
                 INSERT INTO custom_tournament_teams (tournament_id, team_name, player_uids, captain_uid)
@@ -1349,11 +1477,11 @@ def create_custom_tournament():
                 """
                 team_params = [
                     tournament_id,
-                    team.get('team_name', ''),
+                    team.get('team_name', '').strip(),
                     json.dumps(team.get('player_uids', [])),
                     team.get('captain_uid')
                 ]
-                
+
                 team_id = execute_insert_query(team_query, team_params)
                 if not team_id:
                     logger.warning(f"创建队伍失败: {team.get('team_name', '')}")
@@ -1927,8 +2055,23 @@ def link_match_to_tournament(tournament_id):
 
 @app.route('/api/custom-tournaments/<int:tournament_id>/matches/<int:link_id>', methods=['DELETE'])
 def unlink_match_from_tournament(tournament_id, link_id):
-    """取消关联比赛"""
+    """取消关联比赛（带智能队伍清理）"""
     try:
+        # 首先获取要删除的比赛关联信息，包括涉及的队伍
+        match_info_query = """
+        SELECT team1_id, team2_id, match_id
+        FROM custom_tournament_matches 
+        WHERE id = %s AND tournament_id = %s
+        """
+        match_info = execute_query(match_info_query, [link_id, tournament_id])
+        
+        if not match_info:
+            return jsonify({'success': False, 'error': '关联记录不存在'}), 404
+        
+        team1_id = match_info[0]['team1_id']
+        team2_id = match_info[0]['team2_id']
+        
+        # 删除比赛关联记录
         delete_query = """
         DELETE FROM custom_tournament_matches 
         WHERE id = %s AND tournament_id = %s
@@ -1937,6 +2080,41 @@ def unlink_match_from_tournament(tournament_id, link_id):
         
         if not success:
             return jsonify({'success': False, 'error': '取消关联失败'}), 500
+        
+        # 智能清理未使用的队伍
+        deleted_teams = []
+        for team_id in [team1_id, team2_id]:
+            if team_id:
+                # 检查该队伍是否还在其他比赛中使用
+                team_usage_query = """
+                SELECT COUNT(*) as usage_count
+                FROM custom_tournament_matches
+                WHERE tournament_id = %s AND (team1_id = %s OR team2_id = %s)
+                """
+                usage_result = execute_query(team_usage_query, [tournament_id, team_id, team_id])
+                usage_count = usage_result[0]['usage_count'] if usage_result else 0
+                
+                if usage_count == 0:
+                    # 队伍未被其他比赛使用，可以删除
+                    try:
+                        # 获取队伍名称用于返回信息
+                        team_name_query = "SELECT team_name FROM custom_tournament_teams WHERE id = %s"
+                        team_name_result = execute_query(team_name_query, [team_id])
+                        team_name = team_name_result[0]['team_name'] if team_name_result else f"ID:{team_id}"
+                        
+                        # 删除队伍
+                        delete_team_query = "DELETE FROM custom_tournament_teams WHERE id = %s AND tournament_id = %s"
+                        team_delete_success = execute_update_query(delete_team_query, [team_id, tournament_id])
+                        
+                        if team_delete_success:
+                            deleted_teams.append(team_name)
+                            logger.info(f"已删除未使用的队伍: {team_name} (ID: {team_id})")
+                        else:
+                            logger.warning(f"删除队伍失败: {team_name} (ID: {team_id})")
+                    except Exception as e:
+                        logger.error(f"删除队伍 {team_id} 时出错: {e}")
+                else:
+                    logger.info(f"队伍 {team_id} 仍在其他 {usage_count} 场比赛中使用，保留")
         
         # 更新 total_matches 为当前关联场数
         update_total_query = """
@@ -1953,9 +2131,15 @@ def unlink_match_from_tournament(tournament_id, link_id):
         except Exception as e:
             logger.error(f"更新total_matches失败: {e}")
         
+        # 构建返回消息
+        message = '取消关联成功'
+        if deleted_teams:
+            message += f'，同时删除了未使用的队伍: {", ".join(deleted_teams)}'
+        
         return jsonify({
             'success': True,
-            'message': '取消关联成功'
+            'message': message,
+            'deleted_teams': deleted_teams
         })
         
     except Exception as e:
@@ -1970,7 +2154,7 @@ def get_available_matches():
         limit = int(request.args.get('limit', 20))
         search = request.args.get('search', '')
         
-        # 构建查询 - 获取还未被关联到任何自定义比赛的比赛
+        # 构建查询 - 获取所有比赛并标识是否已被关联
         base_query = """
         SELECT 
             m.match_id,
@@ -1978,10 +2162,11 @@ def get_available_matches():
             m.start_time,
             m.group1_all_score,
             m.group2_all_score,
-            m.match_winner
+            m.match_winner,
+            CASE WHEN ctm.match_id IS NOT NULL THEN 1 ELSE 0 END as is_linked
         FROM matches m
         LEFT JOIN custom_tournament_matches ctm ON m.match_id = ctm.match_id
-        WHERE ctm.match_id IS NULL
+        WHERE 1=1
         """
         params = []
         

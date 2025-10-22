@@ -14,23 +14,25 @@ import {
   message,
   Space,
   Tooltip,
-  Popconfirm,
   Tabs,
   Statistic,
   List,
   Avatar,
-  Divider
+  Divider,
+  Collapse,
+  Badge,
+  Popconfirm
 } from 'antd';
 import {
   TeamOutlined,
   TrophyOutlined,
-  PlusOutlined,
-  DeleteOutlined,
   LinkOutlined,
   DisconnectOutlined,
   UserOutlined,
-  CalendarOutlined,
-  SearchOutlined
+  SearchOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined,
+  StarOutlined
 } from '@ant-design/icons';
 import { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -49,7 +51,7 @@ import {
   TournamentLeaderboardResponse
 } from '../services/api';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { TabPane } = Tabs;
 const { Search } = Input;
 
@@ -68,13 +70,187 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
   const [availableMatches, setAvailableMatches] = useState<AvailableMatch[]>([]);
   const [availableMatchesLoading, setAvailableMatchesLoading] = useState(false);
   const [selectedMatches, setSelectedMatches] = useState<string[]>([]);
-  const [searchPlayers, setSearchPlayers] = useState<Player[]>([]);
+  const [linkingMatches, setLinkingMatches] = useState(false);
+
   const [editTeamModalVisible, setEditTeamModalVisible] = useState(false);
   const [editingTeam, setEditingTeam] = useState<CustomTournamentTeam | null>(null);
   const [editTeamName, setEditTeamName] = useState<string>('');
   const [editTeamCaptainUid, setEditTeamCaptainUid] = useState<number | undefined>(undefined);
   const [form] = Form.useForm();
   const [playerUsernameMap, setPlayerUsernameMap] = useState<Record<number, string>>({});
+
+  // 加载状态组件
+  const LoadingIndicator: React.FC = () => (
+    <div style={{ padding: '20px', textAlign: 'center' }}>
+      <Badge status={playersLoading ? "processing" : "default"} text={playersLoading ? "正在加载玩家数据..." : "等待加载玩家数据..."} />
+    </div>
+  );
+
+  // 队员信息展示组件
+  const TeamPlayersList: React.FC<{ team: CustomTournamentTeam; players: Player[]; isCaptain: (uid: number) => boolean }> = ({ team, players, isCaptain }) => {
+    const playersByRole = {
+      captain: players.filter(p => isCaptain(p.uid)),
+      members: players.filter(p => !isCaptain(p.uid))
+    };
+
+    return (
+      <div style={{ background: '#fafafa', borderRadius: 8, padding: '16px', margin: '8px 0' }}>
+        <div style={{ marginBottom: 12 }}>
+          <Badge
+            count={players.length}
+            style={{ backgroundColor: '#52c41a' }}
+            title="队员总数"
+          >
+            <Text strong style={{ fontSize: 14 }}>
+              <TeamOutlined /> {team.team_name} - 队员名单
+            </Text>
+          </Badge>
+        </div>
+
+        {/* 队长 */}
+        {playersByRole.captain.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              marginBottom: 8,
+              color: '#fa8c16',
+              fontSize: 14,
+              fontWeight: 'bold'
+            }}>
+              <StarOutlined style={{ marginRight: 8, color: '#faad14', fontSize: 16 }} />
+              队长
+            </div>
+            <Row gutter={[8, 8]}>
+              {playersByRole.captain.map(player => (
+                <Col key={player.uid} xs={24} sm={12} md={8}>
+                  <Card
+                    size="small"
+                    hoverable
+                    style={{
+                      border: '2px solid #faad14',
+                      background: 'linear-gradient(135deg, #fff7e6 0%, #ffffff 100%)',
+                      boxShadow: '0 2px 8px rgba(250, 173, 20, 0.2)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <Avatar
+                          size="small"
+                          icon={<UserOutlined />}
+                          style={{
+                            backgroundColor: '#faad14',
+                            marginRight: 8,
+                            border: '2px solid #fff'
+                          }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 'bold', fontSize: 13, color: '#d46b08' }}>
+                            {player.username}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#8c6e1f' }}>
+                            UID: {player.uid} · {player.total_matches || 0}场比赛
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <Badge
+                          count={player.platform_level}
+                          style={{
+                            backgroundColor: '#52c41a',
+                            fontSize: 10,
+                            height: 16,
+                            lineHeight: '16px',
+                            boxShadow: '0 0 0 1px #fff'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          </div>
+        )}
+
+        {/* 普通队员 */}
+        {playersByRole.members.length > 0 && (
+          <div>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              marginBottom: 8,
+              color: '#1890ff',
+              fontSize: 14,
+              fontWeight: 'bold'
+            }}>
+              <UserOutlined style={{ marginRight: 8 }} />
+              队员 ({playersByRole.members.length})
+            </div>
+            <Row gutter={[8, 8]}>
+              {playersByRole.members.map(player => (
+                <Col key={player.uid} xs={24} sm={12} md={8}>
+                  <Card
+                    size="small"
+                    hoverable
+                    style={{
+                      border: '1px solid #d9d9d9',
+                      background: '#ffffff',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <Avatar
+                          size="small"
+                          icon={<UserOutlined />}
+                          style={{
+                            backgroundColor: '#1890ff',
+                            marginRight: 8
+                          }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: 13, color: '#1890ff' }}>
+                            {player.username}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#666' }}>
+                            UID: {player.uid} · {player.total_matches || 0}场比赛
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <Badge
+                          count={player.platform_level}
+                          style={{
+                            backgroundColor: '#1890ff',
+                            fontSize: 10,
+                            height: 16,
+                            lineHeight: '16px'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          </div>
+        )}
+
+        {players.length === 0 && (
+          <div style={{
+            textAlign: 'center',
+            color: '#999',
+            padding: '20px 0',
+            fontStyle: 'italic'
+          }}>
+            <UserOutlined style={{ marginRight: 8, fontSize: 16 }} />
+            该队伍暂无队员
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // 新增：队伍统计与排行榜相关状态
   const [teamStats, setTeamStats] = useState<CustomTournamentTeamStatsItem[]>([]);
@@ -83,6 +259,9 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
   const [leaderboardMapFilter, setLeaderboardMapFilter] = useState<string>('');
   const [statTypes, setStatTypes] = useState<StatType[]>([]);
   const [availableMaps, setAvailableMaps] = useState<string[]>([]);
+  const [expandedTeams, setExpandedTeams] = useState<Set<number>>(new Set());
+  const [playerUidMap, setPlayerUidMap] = useState<Record<number, Player>>({});
+  const [playersLoading, setPlayersLoading] = useState(false);
 
   // 获取比赛详情
   const fetchTournamentDetail = async () => {
@@ -156,12 +335,10 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
     fetchTournamentDetail();
     fetchTeamStats();
     fetchStatTypesAndFilters();
-  }, [tournamentId]);
+    preloadAllPlayers(); // 预加载玩家数据（包含username映射）
 
-  // 切换统计类型或地图过滤时刷新排行榜
-  useEffect(() => {
-    fetchLeaderboard();
-  }, [tournamentId, leaderboardStatType, leaderboardMapFilter]);
+    // 清除重复的fetchTournamentDetail调用
+  }, [tournamentId]);
 
   // 获取可用比赛列表
   const fetchAvailableMatches = async (search?: string) => {
@@ -179,119 +356,176 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
     }
   };
 
-  // 搜索玩家
-  const handleSearchPlayers = async (nickname: string) => {
-    try {
-      const players = await playersAPI.searchPlayers(nickname);
-      setSearchPlayers(players);
-    } catch (error) {
-      console.error('搜索玩家失败:', error);
-    }
-  };
 
+
+// 添加玩家数据预加载日志
   useEffect(() => {
-    fetchTournamentDetail();
-  }, [tournamentId]);
-
-  // 加载所有玩家以建立 uid->username 映射
-  const loadAllPlayersUsernameMap = async () => {
-    try {
-      const allPlayers = await playersAPI.searchPlayers('');
-      const map: Record<number, string> = {};
-      (allPlayers || []).forEach((p) => {
-        if (typeof p.uid === 'number') {
-          map[p.uid] = p.username || String(p.uid);
-        }
-      });
-      setPlayerUsernameMap(map);
-    } catch (error) {
-      console.error('加载玩家列表失败:', error);
+    if (Object.keys(playerUidMap).length > 0) {
+      console.log(`✅ 玩家数据预加载完成，共 ${Object.keys(playerUidMap).length} 个玩家`);
     }
-  };
+  }, [playerUidMap]);
 
+  // 切换统计类型或地图过滤时刷新排行榜
   useEffect(() => {
-    loadAllPlayersUsernameMap();
-  }, []);
+    if (tournamentId) { // 确保tournamentId存在才调用
+      fetchLeaderboard();
+    }
+  }, [tournamentId, leaderboardStatType, leaderboardMapFilter]);
 
-  // 状态标签颜色映射
-  const getStatusColor = (status: string) => {
-    const colorMap: Record<string, string> = {
-      draft: 'default',
-      active: 'processing',
-      completed: 'success',
-      cancelled: 'error',
-    };
-    return colorMap[status] || 'default';
-  };
-
-  // 状态文本映射
-  const getStatusText = (status: string) => {
-    const textMap: Record<string, string> = {
-      draft: '草稿',
-      active: '进行中',
-      completed: '已完成',
-      cancelled: '已取消',
-    };
-    return textMap[status] || status;
-  };
-
+  
   // 格式化时间
   const formatTime = (timestamp: number) => {
     return dayjs(timestamp * 1000).format('YYYY-MM-DD HH:mm');
   };
 
+  // 预加载所有玩家数据并创建UID映射（合并原来的两个函数）
+  const preloadAllPlayers = async () => {
+    // 防止重复调用
+    if (playersLoading || Object.keys(playerUidMap).length > 0) {
+      console.log('玩家数据已在加载中或已完成，跳过重复调用');
+      return;
+    }
+
+    setPlayersLoading(true);
+    try {
+      console.log('开始预加载玩家数据...');
+      const players = await playersAPI.searchPlayers('');
+      if (players && players.length > 0) {
+        // 创建UID到Player的映射
+        const uidMap: Record<number, Player> = {};
+        // 创建UID到username的映射
+        const usernameMap: Record<number, string> = {};
+
+        players.forEach(player => {
+          if (player.uid) {
+            uidMap[player.uid] = player;
+            usernameMap[player.uid] = player.username || String(player.uid);
+          }
+        });
+
+        setPlayerUidMap(uidMap);
+        setPlayerUsernameMap(usernameMap);
+        console.log(`✅ 预加载完成，共 ${players.length} 个玩家数据`);
+      }
+    } catch (error) {
+      console.error('❌ 预加载玩家数据失败:', error);
+      message.error('预加载玩家数据失败，请刷新页面重试');
+    } finally {
+      setPlayersLoading(false);
+    }
+  };
+
+  // 根据UID获取队员信息（使用预加载的映射）
+  const getTeamPlayers = (team: CustomTournamentTeam): Player[] => {
+    const player_uids = team.player_uids || [];
+    if (player_uids.length === 0) {
+      return [];
+    }
+
+    return player_uids.map(uid => {
+      const player = playerUidMap[uid];
+      if (player) {
+        return player;
+      }
+      // 如果找不到玩家，返回默认信息
+      return {
+        uid,
+        username: `UID: ${uid}`,
+        platform_level: 0,
+        steam_id: '',
+        total_matches: 0
+      } as Player;
+    });
+  };
+
+  // 切换队伍展开状态
+  const toggleTeamExpansion = (team: CustomTournamentTeam) => {
+    const newExpanded = new Set(expandedTeams);
+
+    if (newExpanded.has(team.id)) {
+      newExpanded.delete(team.id);
+      setExpandedTeams(newExpanded);
+    } else {
+      newExpanded.add(team.id);
+      setExpandedTeams(newExpanded);
+    }
+  };
+
+
+
   // 关联比赛
   const handleLinkMatches = async () => {
+    // 防抖：如果正在处理中，直接返回
+    if (linkingMatches) {
+      return;
+    }
+
     if (selectedMatches.length === 0) {
       message.warning('请选择要关联的比赛');
       return;
     }
 
+    setLinkingMatches(true);
     try {
+      const failedMatches: string[] = [];
       for (const matchId of selectedMatches) {
-        await customTournamentsAPI.linkMatch(tournamentId, {
-          match_id: matchId,
-          match_order: 0,
-        });
+        try {
+          await customTournamentsAPI.linkMatch(tournamentId,   {
+            match_id: matchId,
+            match_order: 0,
+          });
+        } catch (error: any) {
+          const errorMsg = error.response?.data?.error || `比赛${matchId}关联失败`;
+          failedMatches.push(errorMsg);
+        }
       }
-      message.success('关联比赛成功');
+
+      if (failedMatches.length === 0) {
+        message.success(`成功关联 ${selectedMatches.length} 场比赛`);
+      } else {
+        const successCount = selectedMatches.length - failedMatches.length;
+        message.warning(
+          <div>
+            <div>成功关联 {successCount} 场比赛，{failedMatches.length} 场失败</div>
+            <div style={{ fontSize: '12px', marginTop: '8px', color: '#ff4d4f' }}>
+              {failedMatches[0]}
+            </div>
+          </div>
+        );
+      }
+
       setLinkMatchModalVisible(false);
       setSelectedMatches([]);
       fetchTournamentDetail();
+      fetchTeamStats();
+      fetchLeaderboard();
     } catch (error) {
       console.error('关联比赛失败:', error);
-      message.error('关联比赛失败');
+      message.error('关联比赛失败，请稍后重试');
+    } finally {
+      setLinkingMatches(false);
     }
   };
 
   // 取消关联比赛
   const handleUnlinkMatch = async (linkId: number) => {
     try {
-      await customTournamentsAPI.unlinkMatch(tournamentId, linkId);
-      message.success('取消关联成功');
+      const res = await customTournamentsAPI.unlinkMatch(tournamentId, linkId);
+
+      message.success(res.message || '取消关联成功');
       fetchTournamentDetail();
-    } catch (error) {
+      fetchTeamStats();
+      fetchLeaderboard();
+    } catch (error: any) {
       console.error('取消关联失败:', error);
-      message.error('取消关联失败');
+      const errorMsg = error.response?.data?.error || '取消关联失败';
+      message.error(errorMsg);
     }
   };
 
-  // 删除队伍
-  const handleDeleteTeam = async (teamId: number) => {
-    try {
-      const res = await customTournamentsAPI.deleteTeam(tournamentId, teamId);
-      if (res.success) {
-        message.success('删除队伍成功');
-        fetchTournamentDetail();
-      } else {
-        message.error((res as any)?.message || '删除队伍失败');
-      }
-    } catch (error) {
-      console.error('删除队伍失败:', error);
-      message.error('删除队伍失败');
-    }
-  };
 
+
+  
   // 打开编辑队伍弹窗
   const openEditTeamModal = (team: CustomTournamentTeam) => {
     setEditingTeam(team);
@@ -308,22 +542,43 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
       message.warning('队伍名称不能为空');
       return;
     }
+
+    // 前端验证
+    if (name.length > 50) {
+      message.error('队伍名称最多50字符');
+      return;
+    }
+    if (/[<>'"&]/.test(name)) {
+      message.error('队伍名称包含非法字符');
+      return;
+    }
+
     try {
-      await customTournamentsAPI.updateTeam(
+      const response = await customTournamentsAPI.updateTeam(
         tournamentId,
         editingTeam.id,
         { team_name: name, captain_uid: typeof editTeamCaptainUid === 'number' ? editTeamCaptainUid : null }
       );
-      message.success('队伍信息已更新');
-      setEditTeamModalVisible(false);
-      setEditingTeam(null);
-      setEditTeamName('');
-      setEditTeamCaptainUid(undefined);
-      fetchTournamentDetail();
-    } catch (error) {
+      if (response.success) {
+        message.success('队伍信息已更新');
+        setEditTeamModalVisible(false);
+        setEditingTeam(null);
+        setEditTeamName('');
+        setEditTeamCaptainUid(undefined);
+        fetchTournamentDetail();
+      } else {
+        message.error(response.error || '更新队伍失败');
+      }
+    } catch (error: any) {
       console.error('更新队伍失败:', error);
-      message.error('更新队伍失败');
+      const errorMsg = error.response?.data?.error || '更新队伍失败';
+      message.error(errorMsg);
     }
+  };
+
+  // 判断是否为队长
+  const isCaptain = (team: CustomTournamentTeam, playerUid: number) => {
+    return team.captain_uid === playerUid;
   };
 
   // 队伍表格列定义
@@ -332,29 +587,101 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
       title: '队伍名称',
       dataIndex: 'team_name',
       key: 'team_name',
-      render: (text: string) => (
-        <span>
-          <TeamOutlined /> {text}
-        </span>
+      render: (text: string, record: CustomTournamentTeam) => (
+        <div
+          style={{
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            color: '#1890ff',
+            fontWeight: 500
+          }}
+          onClick={() => toggleTeamExpansion(record)}
+        >
+          {expandedTeams.has(record.id) ?
+            <CaretDownOutlined style={{ marginRight: 8 }} /> :
+            <CaretRightOutlined style={{ marginRight: 8 }} />
+          }
+          <TeamOutlined style={{ marginRight: 6 }} />
+          {text}
+          <Text style={{ marginLeft: 8, color: '#999', fontSize: 12, fontWeight: 'normal' }}>
+            点击查看队员 ({record.player_uids?.length || 0})
+          </Text>
+        </div>
       ),
     },
     {
       title: '队长',
       dataIndex: 'captain_username',
       key: 'captain_username',
-      render: (text: string, record: CustomTournamentTeam) => (
-        text || record.captain_username || '未设置'
-      ),
+      render: (_: string, record: CustomTournamentTeam) => {
+        const captain = record.captain_uid;
+        const captainInfo = captain ? playerUidMap[captain] : null;
+
+        return (
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            {captainInfo ? (
+              <>
+                <Avatar
+                  size="small"
+                  icon={<UserOutlined />}
+                  style={{ backgroundColor: '#faad14', marginRight: 8 }}
+                />
+                <span>
+                  {captainInfo.username}
+                  <Badge
+                    count={captainInfo.platform_level}
+                    style={{
+                      backgroundColor: '#52c41a',
+                      fontSize: 10,
+                      height: 16,
+                      lineHeight: '16px',
+                      marginLeft: 8
+                    }}
+                  />
+                </span>
+              </>
+            ) : (
+              <span style={{ color: '#999' }}>
+                未设置
+                {captain && <Text style={{ fontSize: 12 }}> (UID: {captain})</Text>}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: '队员数量',
       dataIndex: 'player_uids',
       key: 'player_count',
-      render: (uids: number[]) => (
-        <span>
-          <UserOutlined /> {uids ? uids.length : 0}
-        </span>
-      ),
+      render: (uids: number[]) => {
+        const loadedCount = uids ? uids.filter(uid => playerUidMap[uid]).length : 0;
+        const totalCount = uids ? uids.length : 0;
+
+        return (
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <UserOutlined style={{ marginRight: 8 }} />
+            <span>{totalCount}</span>
+            {loadedCount > 0 && loadedCount < totalCount && (
+              <Tooltip title={`已匹配 ${loadedCount}/${totalCount} 名队员信息`}>
+                <Badge
+                  status="warning"
+                  style={{ marginLeft: 8 }}
+                />
+              </Tooltip>
+            )}
+            {loadedCount === totalCount && totalCount > 0 && (
+              <Tooltip title={`已匹配所有队员信息`}>
+                <Badge
+                  status="success"
+                  style={{ marginLeft: 8 }}
+                />
+              </Tooltip>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: '胜负记录',
@@ -364,32 +691,36 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
         const wins = stats?.wins ?? 0;
         const losses = stats?.losses ?? 0;
         const matches = stats?.matches_played ?? (wins + losses);
+        const winRate = matches > 0 ? (wins / matches * 100).toFixed(1) : 0;
+
         return (
-          <span>
-            {wins}胜 {losses}负{typeof matches === 'number' ? `（${matches}场）` : ''}
-          </span>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span style={{ color: '#52c41a', fontWeight: 'bold', marginRight: 12 }}>
+                {wins}胜
+              </span>
+              <span style={{ color: '#ff4d4f', fontWeight: 'bold', marginRight: 12 }}>
+                {losses}负
+              </span>
+              <span style={{ color: '#1890ff', fontSize: 12 }}>
+                ({matches}场)
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+              胜率: {winRate}%
+            </div>
+          </div>
         );
       },
     },
     {
       title: '操作',
       key: 'action',
+      width: 100,
       render: (_, record: CustomTournamentTeam) => (
-        <Space>
-          <Button type="text" size="small" onClick={() => openEditTeamModal(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="确定要删除这个队伍吗？"
-            onConfirm={() => {
-              handleDeleteTeam(record.id);
-            }}
-          >
-            <Button type="text" danger size="small">
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
+        <Button type="text" size="small" onClick={() => openEditTeamModal(record)}>
+          编辑
+        </Button>
       ),
     },
   ];
@@ -448,8 +779,11 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
       width: 100,
       render: (_, record: CustomTournamentMatch) => (
         <Popconfirm
-          title="确定要取消关联这场比赛吗？"
+          title="取消关联比赛"
+          description="确定要取消关联这场比赛吗？系统将智能处理相关队伍：若队伍仍被其他比赛使用则保留，否则自动清除。"
           onConfirm={() => handleUnlinkMatch(record.id)}
+          okText="确认取消关联"
+          cancelText="取消"
         >
           <Tooltip title="取消关联">
             <Button
@@ -489,6 +823,19 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
       render: (_, record: AvailableMatch) => (
         `${record.group1_all_score} : ${record.group2_all_score}`
       ),
+    },
+    {
+      title: '状态',
+      key: 'status',
+      width: 80,
+      render: (_, record: AvailableMatch) => {
+        const isLinked = record.is_linked === 1;
+        return isLinked ? (
+          <Tag color="green">已关联</Tag>
+        ) : (
+          <Tag color="default">未关联</Tag>
+        );
+      },
     },
   ];
 
@@ -545,15 +892,60 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
         <Tabs defaultActiveKey="teams">
           <TabPane tab={`队伍 (${tournament?.teams.length || 0})`} key="teams">
             <div style={{ marginBottom: '16px' }}>
-              {/* 移除添加队伍按钮，队伍由关联比赛自动生成 */}
+              {/* 队伍管理说明 */}
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  💡 点击队伍名称查看队员详情
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 16 }}>
+                  📝 队伍通过关联比赛自动生成，移除未使用的队伍请解除对应比赛关联
+                </Text>
+              </div>
+              {Object.keys(playerUidMap).length === 0 && (
+                <Text type="warning" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+                  ⚠️ 正在加载玩家数据...
+                </Text>
+              )}
             </div>
-            <Table
-              columns={teamColumns}
-              dataSource={tournament?.teams || []}
-              rowKey="id"
-              pagination={false}
-              size="small"
-            />
+
+            {Object.keys(playerUidMap).length > 0 ? (
+              <Table
+                columns={teamColumns}
+                dataSource={tournament?.teams || []}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                expandable={{
+                  expandedRowKeys: Array.from(expandedTeams),
+                  onExpand: (_, record) => {
+                    toggleTeamExpansion(record);
+                  },
+                  expandedRowRender: (record: CustomTournamentTeam) => {
+                    const players = getTeamPlayers(record);
+
+                    return (
+                      <div style={{ margin: 0 }}>
+                        <TeamPlayersList
+                          team={record}
+                          players={players}
+                          isCaptain={(uid) => isCaptain(record, uid)}
+                        />
+                      </div>
+                    );
+                  },
+                  rowExpandable: (record) => {
+                    return (record.player_uids && record.player_uids.length > 0) || false;
+                  }
+                }}
+              />
+            ) : (
+              <div style={{ padding: '40px 0', textAlign: 'center' }}>
+                <LoadingIndicator />
+                <div style={{ marginTop: 16, color: '#666', fontSize: 14 }}>
+                  正在预加载所有玩家数据，请稍候...
+                </div>
+              </div>
+            )}
           </TabPane>
 
           <TabPane tab={`队伍统计`} key="team-stats">
@@ -667,6 +1059,7 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
         width={800}
         okText="关联选中的比赛"
         cancelText="取消"
+        confirmLoading={linkingMatches}
       >
         <div style={{ marginBottom: '16px' }}>
           <Search
@@ -690,6 +1083,9 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
             onChange: (selectedRowKeys) => {
               setSelectedMatches(selectedRowKeys as string[]);
             },
+            getCheckboxProps: (record: AvailableMatch) => ({
+              disabled: record.is_linked === 1,
+            }),
           }}
           size="small"
         />

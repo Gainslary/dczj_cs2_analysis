@@ -458,3 +458,8 @@ SELECT
 FROM custom_tournament_teams ctt
 LEFT JOIN custom_tournaments ct ON ctt.tournament_id = ct.id
 LEFT JOIN players p ON ctt.captain_uid = p.uid;
+
+-- 添加索引优化查询性能
+CREATE INDEX idx_custom_tournaments_creator ON custom_tournaments(creator_uid);
+CREATE INDEX idx_custom_tournament_teams_tournament ON custom_tournament_teams(tournament_id);
+CREATE INDEX idx_custom_tournament_matches_tournament ON custom_tournament_matches(tournament_id);

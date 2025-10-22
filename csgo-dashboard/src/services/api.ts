@@ -655,6 +655,7 @@ export interface AvailableMatch {
   group1_all_score: number;
   group2_all_score: number;
   match_winner: number;
+  is_linked: number; // 0: 未关联, 1: 已关联
 }
 
 export interface AvailableMatchesResponse {
@@ -712,8 +713,8 @@ export const customTournamentsAPI = {
   },
 
   // 创建自定义比赛
-  createTournament: async (data: CreateCustomTournamentRequest): Promise<{ success: boolean; data: { tournament_id: number }; message: string }> => {
-    const response = await api.post<{ success: boolean; data: { tournament_id: number }; message: string }>('/custom-tournaments', data);
+  createTournament: async (data: CreateCustomTournamentRequest): Promise<{ success: boolean; data?: { tournament_id: number }; message?: string; error?: string }> => {
+    const response = await api.post<{ success: boolean; data?: { tournament_id: number }; message?: string; error?: string }>('/custom-tournaments', data);
     return response.data;
   },
 
@@ -727,8 +728,8 @@ export const customTournamentsAPI = {
   },
 
   // 删除自定义比赛
-  deleteTournament: async (tournamentId: number): Promise<{ success: boolean; message: string }> => {
-    const response = await api.delete<{ success: boolean; message: string }>(`/custom-tournaments/${tournamentId}`);
+  deleteTournament: async (tournamentId: number): Promise<{ success: boolean; message?: string; error?: string }> => {
+    const response = await api.delete<{ success: boolean; message?: string; error?: string }>(`/custom-tournaments/${tournamentId}`);
     return response.data;
   },
 
@@ -737,8 +738,8 @@ export const customTournamentsAPI = {
     tournamentId: number,
     teamId: number,
     data: { team_name?: string; player_uids?: number[]; captain_uid?: number | null }
-  ): Promise<{ success: boolean; message: string }> => {
-    const response = await api.put<{ success: boolean; message: string }>(
+  ): Promise<{ success: boolean; message?: string; error?: string }> => {
+    const response = await api.put<{ success: boolean; message?: string; error?: string }>(
       `/custom-tournaments/${tournamentId}/teams/${teamId}`,
       data
     );
@@ -749,8 +750,8 @@ export const customTournamentsAPI = {
   deleteTeam: async (
     tournamentId: number,
     teamId: number
-  ): Promise<{ success: boolean; message: string }> => {
-    const response = await api.delete<{ success: boolean; message: string }>(
+  ): Promise<{ success: boolean; message?: string; error?: string }> => {
+    const response = await api.delete<{ success: boolean; message?: string; error?: string }>(
       `/custom-tournaments/${tournamentId}/teams/${teamId}`
     );
     return response.data;

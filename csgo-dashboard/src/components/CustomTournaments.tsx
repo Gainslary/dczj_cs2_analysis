@@ -123,17 +123,45 @@ const CustomTournaments: React.FC<CustomTournamentsProps> = () => {
   };
 
   // 删除比赛
-  const handleDelete = async (tournamentId: number) => {
-    try {
-      const response = await customTournamentsAPI.deleteTournament(tournamentId);
-      if (response.success) {
-        message.success('删除成功');
-        fetchTournaments(pagination.current, pagination.pageSize);
+  const handleDelete = async (tournament: CustomTournament) => {
+    Modal.confirm({
+      title: '删除自定义比赛确认',
+      content: (
+        <div>
+          <p>确定要删除比赛 <strong>"{tournament.name}"</strong> 吗？</p>
+          <div style={{ marginTop: 16, padding: 12, backgroundColor: '#fff2f0', borderRadius: 6 }}>
+            <p style={{ margin: 0, color: '#cf1322' }}>
+              <strong>⚠️ 警告：此操作不可撤销！</strong>
+            </p>
+            <ul style={{ margin: '8px 0 0 0', paddingLeft: 20, color: '#cf1322' }}>
+              <li>比赛数据将被永久删除</li>
+              <li>所有相关队伍信息将被删除</li>
+              <li>所有比赛关联将被删除</li>
+              <li>排行榜数据将被清空</li>
+            </ul>
+          </div>
+        </div>
+      ),
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      width: 480,
+      onOk: async () => {
+        try {
+          const response = await customTournamentsAPI.deleteTournament(tournament.id);
+          if (response.success) {
+            message.success('删除成功');
+            fetchTournaments(pagination.current, pagination.pageSize);
+          } else {
+            message.error(response.error || '删除失败');
+          }
+        } catch (error: any) {
+          console.error('删除比赛失败:', error);
+          const errorMsg = error.response?.data?.error || '删除比赛失败';
+          message.error(errorMsg);
+        }
       }
-    } catch (error) {
-      console.error('删除比赛失败:', error);
-      message.error('删除比赛失败');
-    }
+    });
   };
 
   // 查看详情
@@ -234,20 +262,14 @@ const CustomTournaments: React.FC<CustomTournamentsProps> = () => {
             />
           </Tooltip>
           {/* 移除无效的编辑按钮 */}
-          <Popconfirm
-            title="确定要删除这个比赛吗？"
-            onConfirm={() => handleDelete(record.id)}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Tooltip title="删除">
-              <Button
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title="删除">
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDelete(record)}
+            />
+          </Tooltip>
         </Space>
       ),
     },
