@@ -988,7 +988,7 @@ def get_leaderboard():
     """获取全玩家排行榜数据"""
     try:
         # 获取查询参数
-        stat_type = request.args.get('stat', 'rating2')  # 排行榜类型
+        stat_type = request.args.get('stat_type') or request.args.get('stat', 'rating2')  # 排行榜类型
         map_filter = request.args.get('map', '')  # 地图筛选
 
         # 验证排行榜类型
