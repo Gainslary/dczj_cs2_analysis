@@ -809,11 +809,13 @@ export const customTournamentsAPI = {
 
   // 获取可用于关联的比赛列表
   getAvailableMatches: async (
+    tournamentId: number,
     page: number = 1,
     limit: number = 20,
     search?: string
   ): Promise<AvailableMatchesResponse> => {
     const params = new URLSearchParams();
+    params.append('tournament_id', tournamentId.toString());
     params.append('page', page.toString());
     params.append('limit', limit.toString());
     if (search) params.append('search', search);

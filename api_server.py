@@ -2153,8 +2153,12 @@ def get_available_matches():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
         search = request.args.get('search', '')
+        tournament_id = request.args.get('tournament_id')
         
-        # 构建查询 - 获取所有比赛并标识是否已被关联
+        if not tournament_id:
+            return jsonify({'success': False, 'error': '缺少tournament_id参数'}), 400
+        
+        # 构建查询 - 获取所有比赛并标识是否已被当前自定义比赛关联
         base_query = """
         SELECT 
             m.match_id,
@@ -2165,10 +2169,10 @@ def get_available_matches():
             m.match_winner,
             CASE WHEN ctm.match_id IS NOT NULL THEN 1 ELSE 0 END as is_linked
         FROM matches m
-        LEFT JOIN custom_tournament_matches ctm ON m.match_id = ctm.match_id
+        LEFT JOIN custom_tournament_matches ctm ON m.match_id = ctm.match_id AND ctm.tournament_id = %s
         WHERE 1=1
         """
-        params = []
+        params = [tournament_id]
         
         if search:
             base_query += " AND (m.match_id LIKE %s OR m.map_name LIKE %s)"

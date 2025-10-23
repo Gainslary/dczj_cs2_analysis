@@ -344,7 +344,7 @@ const CustomTournamentDetailComponent: React.FC<CustomTournamentDetailProps> = (
   const fetchAvailableMatches = async (search?: string) => {
     setAvailableMatchesLoading(true);
     try {
-      const response = await customTournamentsAPI.getAvailableMatches(1, 50, search);
+      const response = await customTournamentsAPI.getAvailableMatches(tournamentId, 1, 50, search);
       if (response.success) {
         setAvailableMatches(response.data);
       }
