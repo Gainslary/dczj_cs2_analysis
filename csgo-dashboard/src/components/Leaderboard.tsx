@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { leaderboardAPI, LeaderboardPlayer, StatType, LeaderboardFilters } from '../services/api';
+import { leaderboardAPI, LeaderboardPlayer, StatType, LeaderboardFilters, TimePreset } from '../services/api';
 import './Leaderboard.css';
 
 const Leaderboard: React.FC = () => {
@@ -7,11 +7,14 @@ const Leaderboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statTypes, setStatTypes] = useState<StatType[]>([]);
-  const [filters, setFilters] = useState<LeaderboardFilters>({ maps: [], seasons: [] });
+  const [filters, setFilters] = useState<LeaderboardFilters>({ maps: [], seasons: [], time_presets: [] });
   
   // 筛选状态
   const [selectedStat, setSelectedStat] = useState('rating2');
   const [selectedMap, setSelectedMap] = useState('');
+  const [selectedTimePreset, setSelectedTimePreset] = useState<string>('');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   
   // 玩家详情模态框状态
   const [selectedPlayer, setSelectedPlayer] = useState<LeaderboardPlayer | null>(null);
@@ -27,6 +30,9 @@ const Leaderboard: React.FC = () => {
         ]);
         setStatTypes(statsTypesData);
         setFilters(filtersData);
+        // 设置时间预设默认值为全部时间
+        const defaultPreset = (filtersData.time_presets || []).find((p: TimePreset) => p.key === 'all');
+        setSelectedTimePreset(defaultPreset?.key || 'all');
       } catch (err) {
         console.error('加载初始数据失败:', err);
         setError('加载初始数据失败');
@@ -42,9 +48,16 @@ const Leaderboard: React.FC = () => {
     setError(null);
     
     try {
+      const timePresetParam = selectedTimePreset === 'custom' ? undefined : selectedTimePreset || undefined;
+      const startDateParam = selectedTimePreset === 'custom' ? (customStartDate || undefined) : undefined;
+      const endDateParam = selectedTimePreset === 'custom' ? (customEndDate || undefined) : undefined;
+
       const response = await leaderboardAPI.getLeaderboard(
         selectedStat,
-        selectedMap
+        selectedMap,
+        timePresetParam,
+        startDateParam,
+        endDateParam
       );
       setPlayers(response.data);
     } catch (err) {
@@ -58,7 +71,7 @@ const Leaderboard: React.FC = () => {
   // 当筛选条件改变时重新加载数据
   useEffect(() => {
     loadLeaderboard();
-  }, [selectedStat, selectedMap]);
+  }, [selectedStat, selectedMap, selectedTimePreset, customStartDate, customEndDate]);
 
   // 获取统计值显示格式
   const formatStatValue = (value: number, statType: string): string => {
@@ -168,6 +181,39 @@ const Leaderboard: React.FC = () => {
             ))}
           </select>
         </div>
+
+        <div className="filter-group">
+          <label>时间范围:</label>
+          <select
+            value={selectedTimePreset}
+            onChange={(e) => setSelectedTimePreset(e.target.value)}
+            className="filter-select"
+          >
+            {(filters.time_presets || []).map((preset) => (
+              <option key={preset.key} value={preset.key}>{preset.name}</option>
+            ))}
+            <option value="custom">自定义范围</option>
+          </select>
+        </div>
+
+        {selectedTimePreset === 'custom' && (
+          <div className="filter-group">
+            <label>开始日期:</label>
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              className="filter-input"
+            />
+            <label style={{ marginLeft: 12 }}>结束日期:</label>
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              className="filter-input"
+            />
+          </div>
+        )}
 
 
 

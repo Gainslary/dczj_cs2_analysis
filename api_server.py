@@ -8,7 +8,7 @@ from mysql.connector import Error
 from mysql.connector import pooling
 import json
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import logging
 import time
 
@@ -990,6 +990,53 @@ def get_leaderboard():
         # 获取查询参数
         stat_type = request.args.get('stat_type') or request.args.get('stat', 'rating2')  # 排行榜类型
         map_filter = request.args.get('map', '')  # 地图筛选
+        # 时间筛选（默认近一个月）
+        # 支持：start_date, end_date（ISO或YYYY-MM-DD）；time_preset/preset/time_range: last_week|last_month|ytd|all
+        time_preset = request.args.get('time_preset') or request.args.get('preset') or request.args.get('time_range')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+
+        def parse_dt(s):
+            if not s:
+                return None
+            try:
+                return datetime.fromisoformat(s)
+            except Exception:
+                try:
+                    return datetime.strptime(s, '%Y-%m-%d')
+                except Exception:
+                    return None
+
+        now = datetime.now()
+        start_dt = None
+        end_dt = None
+
+        if start_date_str or end_date_str:
+            start_dt = parse_dt(start_date_str)
+            end_dt = parse_dt(end_date_str) or now
+            # 若仅提供了end_date，默认取end_date往前30天
+            if start_dt is None and end_dt is not None:
+                start_dt = end_dt - timedelta(days=30)
+        else:
+            preset = (time_preset or '').lower()
+            if preset in ('last_week', '7d', 'week'):
+                start_dt = now - timedelta(days=7)
+                end_dt = now
+            elif preset in ('last_month', '30d', 'month'):
+                # 近一个月
+                start_dt = now - timedelta(days=30)
+                end_dt = now
+            elif preset in ('ytd', 'year_to_date', 'this_year', '今年以来'):
+                start_dt = datetime(now.year, 1, 1)
+                end_dt = now
+            elif preset in ('all', 'none'):
+                # 不限定时间范围
+                start_dt = None
+                end_dt = None
+            else:
+                # 未识别预设或空值，默认全部时间
+                start_dt = None
+                end_dt = None
 
         # 验证排行榜类型
         valid_stats = {
@@ -1055,6 +1102,14 @@ def get_leaderboard():
             base_query += " AND m.map_name = %s"
             params.append(map_filter)
 
+        # 添加时间筛选（比赛开始时间）
+        if start_dt and end_dt:
+            # 将datetime对象转换为Unix时间戳（秒）
+            start_timestamp = int(start_dt.timestamp())
+            end_timestamp = int(end_dt.timestamp())
+            base_query += " AND m.start_time BETWEEN %s AND %s"
+            params.extend([start_timestamp, end_timestamp])
+
         # 分组和排序 - 使用原始统计表达式而不是别名，以避免NULL值排序问题
         # MySQL不支持NULLS LAST，使用COALESCE来处理NULL值
         base_query += f"""
@@ -1108,7 +1163,12 @@ def get_leaderboard():
             'meta': {
                 'stat_type': stat_type,
                 'total_players': len(leaderboard_data),
-                'map_filter': map_filter
+                'map_filter': map_filter,
+                'time_filter': {
+                    'preset': (time_preset or '').lower() if not (start_date_str or end_date_str) else 'custom',
+                    'start': start_dt.isoformat() if start_dt else None,
+                    'end': end_dt.isoformat() if end_dt else None
+                }
             }
         })
 
@@ -1156,11 +1216,20 @@ def get_leaderboard_filters():
         seasons_query = "SELECT DISTINCT season FROM match_player_stats WHERE season IS NOT NULL ORDER BY season DESC"
         seasons_result = execute_query(seasons_query)
         
+        # 时间预设
+        time_presets = [
+            {'key': 'all', 'name': '全部时间', 'description': '不限制时间范围（默认）'},
+            {'key': 'last_week', 'name': '近一周', 'description': '最近7天'},
+            {'key': 'last_month', 'name': '近一月', 'description': '最近30天'},
+            {'key': 'ytd', 'name': '今年以来', 'description': '从今年1月1日至今'}
+        ]
+        
         return jsonify({
             'success': True,
             'data': {
                 'maps': [row['map_name'] for row in maps_result] if maps_result else [],
-                'seasons': [row['season'] for row in seasons_result] if seasons_result else []
+                'seasons': [row['season'] for row in seasons_result] if seasons_result else [],
+                'time_presets': time_presets
             }
         })
         

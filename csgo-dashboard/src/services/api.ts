@@ -488,6 +488,11 @@ export interface LeaderboardResponse {
     season_filter: string;
     min_matches: number;
     limit: number;
+    time_filter?: {
+      preset?: string;
+      start?: string;
+      end?: string;
+    };
   };
 }
 
@@ -497,9 +502,16 @@ export interface StatType {
   description: string;
 }
 
+export interface TimePreset {
+  key: string;
+  name: string;
+  description?: string;
+}
+
 export interface LeaderboardFilters {
   maps: string[];
   seasons: string[];
+  time_presets?: TimePreset[];
 }
 
 export const playersAPI = {
@@ -532,11 +544,17 @@ export const leaderboardAPI = {
   // 获取排行榜数据
   getLeaderboard: async (
     statType: string = 'rating2',
-    mapFilter: string = ''
+    mapFilter: string = '',
+    timePreset?: string,
+    startDate?: string,
+    endDate?: string
   ): Promise<LeaderboardResponse> => {
     const params = new URLSearchParams();
     params.append('stat_type', statType);
     if (mapFilter) params.append('map', mapFilter);
+    if (timePreset) params.append('time_preset', timePreset);
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
     
     const response = await api.get<LeaderboardResponse>(`/leaderboard?${params.toString()}`);
     return response.data;
